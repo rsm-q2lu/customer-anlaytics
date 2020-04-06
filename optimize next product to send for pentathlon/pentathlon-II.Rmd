@@ -1,0 +1,281 @@
+---
+title: "Pentathlon II"
+output: html_document
+---
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+library(ggplot2)
+library(tidyverse)
+library(readxl)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Review the assignment questions on Canvas (week3/pentathlon-II.pdf). Create an Rmarkdown document (pentathlon-II.Rmd) in which you calculate the CLV for each of the plans  an 8 week periods. The relevant data is in `data/pentathlon-II.xlsx` Also, use the average subscription churn and revenue numbers provided in `data/pentathlon-II-avg.csv` to simulate the effect of the different email frequencies over a 104 week period and generate a line plot to compare the five CLV curves. Are your results consistent with your answer to question 3 in week3/pentathlon-II.pdf file on Canvas? Why (or why not)?
+
+## Hints
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>. Go to http://commonmark.org/help/ for a 10-minute interactive Markdown tutorial.
+
+Please generate an HTML (Notebook) with your answers to all the questions listed in the week3/pentathlon-II.pdf file on Canvas. When you have finished editing the the jupyter notebook and generated the HTML report make sure to save, commit, and push to GitLab. We will collect all files from GitLab after the due date.
+
+## Analysis
+
+Load both `data/pentathlon-II.xls` and `data/pentathlon-II-avg.csv` for use in your analysis. Note that you still have to calculate the weekly discount rate based on the annual discount rate mentioned below.
+
+```{r}
+
+
+email=t(read_excel('data/pentathlon-II.xlsx',col_names = FALSE))
+avg=read.csv('data/pentathlon-II-avg.csv')
+
+
+one=email[,1:4]
+two=email[,6:9]
+three=email[,11:14]
+four=email[,16:19]
+five=email[,21:24]
+
+taketable <- function(table){
+  colnames(table)=c(table[1,1],'attrition','ave_rev_sub','ave_rev_unsub')
+table=as.data.frame(table[-1,])
+table$attrition=as.numeric(as.character(table$attrition))
+table$ave_rev_sub=as.numeric(as.character(table$ave_rev_sub))
+table$ave_rev_unsub=as.numeric(as.character(table$ave_rev_unsub))
+return(table)
+}
+
+
+
+one=taketable(one)
+two=taketable(two)
+three=taketable(three)
+four=taketable(four)
+five=taketable(five)
+
+condition=c('one','two','three','four','five')
+
+```
+
+
+The variables in `data/pentathlon-II-avg.csv` are:
+
+* `schurn` is the average subscription churn over the 8 weeks of the test
+* `rev_sub` is the average revenue from subscribers
+* `rev_unsub` is the average revenue from non-subscribers
+
+
+A few assumptions to start with:
+
+```{r}
+weeks <- 1:8
+weeks_52 = 1:52
+weeks_104 = 1:104
+
+discount_rate <- .1 ## annual discount rate
+week_discount_rate=(discount_rate+1)^(1/52)-1
+cogs <- .6
+discount_num=seq(0.5,7.5,1)
+discount_num_52=seq(0.5,51.5,1)
+discount_num_104=seq(0.5,103.5,1)
+```
+
+Create a code chunk that contains a function that you can call to calculate the CLV for each of the 5 email plans.
+
+
+```{r}
+## insert CLV function below
+## determine what arguments the function needs to generate the required
+## return value
+
+
+clv <- function(df,weeks_num,discount_num) {
+churn=df$attrition
+ave_rev_sub=df$ave_rev_sub
+ave_rev_unsub=df$ave_rev_unsub
+retention_rate= c(1,1-churn[1:(weeks_num-1)])
+retention_rate=cumprod(retention_rate) 
+rev_sub=ave_rev_sub*retention_rate
+rev_unsub=ave_rev_unsub*(1-retention_rate)
+
+total_revenue=rev_sub+rev_unsub
+profit=total_revenue*(1-cogs)
+pv=profit/(1+week_discount_rate)^discount_num
+clv=cumsum(pv)
+df_new=tibble::tibble(churn,ave_rev_sub,ave_rev_unsub,retention_rate,rev_sub,rev_unsub,profit,pv,clv)
+return (clv)
+}
+```
+
+Next, create a tibble with 6 columns. Five columns for the CLV series for each of the plans and one column for the `weeks` variable defined above. Call the `clv` function you created above to fill-in the columns.
+
+```{r}
+one_email=clv(one,8,discount_num)
+
+two_email=clv(two,8,discount_num)
+three_email=clv(three,8,discount_num)
+four_email=clv(four,8,discount_num)
+five_email=clv(five,8,discount_num)
+
+eight_week_clv=cbind(weeks,one_email,two_email,three_email,four_email,five_email)
+eight_week_clv
+
+```
+
+52 weeks:
+
+```{r}
+
+one_avg=avg[1,]
+two_avg=avg[2,]
+three_avg=avg[3,]
+four_avg=avg[4,]
+five_avg=avg[5,]
+
+clv_longterm <- function(df,weeks_num,discount_num) {
+churn=rep(df$schurn,weeks_num)
+ave_rev_sub=rep(df$rev_sub,weeks_num)
+ave_rev_unsub=rep(df$rev_unsub,weeks_num)
+
+retention_rate= c(1,1-churn[1:(weeks_num-1)])
+retention_rate=cumprod(retention_rate) 
+rev_sub=ave_rev_sub*retention_rate
+rev_unsub=ave_rev_unsub*(1-retention_rate)
+total_revenue=rev_sub+rev_unsub
+profit=total_revenue*(1-cogs)
+pv=profit/(1+week_discount_rate)^discount_num
+clv_lt=cumsum(pv)
+df_new=tibble::tibble(churn,ave_rev_sub,ave_rev_unsub,retention_rate,rev_sub,rev_unsub,profit,pv,clv_lt)
+return (clv_lt)
+}
+
+one_email_52=clv_longterm(one_avg,52,discount_num_52)
+two_email_52=clv_longterm(two_avg,52,discount_num_52)
+three_email_52=clv_longterm(three_avg,52,discount_num_52)
+four_email_52=clv_longterm(four_avg,52,discount_num_52)
+five_email_52=clv_longterm(five_avg,52,discount_num_52)
+
+fiftytwo_week_clv=as.data.frame(cbind(weeks_52,one_email_52,two_email_52,three_email_52,four_email_52,five_email_52))
+fiftytwo_week_clv
+
+
+
+```
+
+
+104 weeks:
+```{r}
+one_email_104=clv_longterm(one_avg,104,discount_num_104)
+two_email_104=clv_longterm(two_avg,104,discount_num_104)
+three_email_104=clv_longterm(three_avg,104,discount_num_104)
+four_email_104=clv_longterm(four_avg,104,discount_num_104)
+five_email_104=clv_longterm(five_avg,104,discount_num_104)
+
+onehundredfour_week_clv=as.data.frame(cbind(weeks_104,one_email_104,two_email_104,three_email_104,four_email_104,five_email_104))
+onehundredfour_week_clv
+```
+
+Next, generate three line plots that compare the CLV curves for each of the five plans. The first graphs should plot weeks 1 through 8. The second graph should plot weeks 1 through 52 and the final graph should show weeks 1 through 104.
+
+
+```{r}
+## generate graph 1
+#clv curve for eight weeks
+
+eight_week_clv_gather=as.data.frame(eight_week_clv) %>% gather(frequency,clv,-weeks)
+  
+eight_week_clv_gather %>% ggplot(aes(x=weeks,y=clv,color=frequency,group=frequency))+geom_line()
+
+```
+
+```{r}
+## generate graph 2
+
+fiftytwo_week_clv_gather=fiftytwo_week_clv %>% gather(frequency,clv,-weeks_52)
+
+fiftytwo_week_clv_gather %>% ggplot(aes(x=weeks_52,y=clv,color=frequency,group=frequency))+geom_line()
+```
+
+```{r}
+## generate graph 3
+
+onehundredfour_week_clv_gather=onehundredfour_week_clv %>% gather(frequency,clv,-weeks_104)
+
+onehundredfour_week_clv_gather %>% ggplot(aes(x=weeks_104,y=clv,color=frequency,group=frequency))+geom_line()
+```
+
+
+Please generate a *reproducible* Notebook or HTML report with all your results and your answers to the questions listed in the pentathlon-II.pdf file on Canvas.
+
+When you have finished editing this Rmarkdown document make sure to save, commit, and push it to GitLab. We will collect all the Rmarkdown files from GitLab after the due date.
+
+Note: Make sure to check on GitLab if the CI pipeline completed successfully. If it did, you should see a green check mark on the right-hand side of the main repo project page
+
+### 1.Calculate the 8-week CLVfor each of the fivetested e-mail frequencies.(8points)
+```{r}
+print(eight_week_clv)
+```
+
+### 2.What e-mail frequency should Pentathlonadopt?Motivate your recommendation.(6points)
+
+Three emails a week. Because it resulted in the highest clv for eight weeks, which is $1.07 per customer.
+
+### 3.What e-mail frequency would you recommend if you considered a longer time horizon? Why? Make your argument without formally extending the CLVcalculation.(5points)
+
+3 emails a week. Because from  graph 1, the slope of 3-email is larger than those of others, which means in the long term, the clv is likely to be higher.
+
+### 4. Calculate the CLV for each of the plans after 104 weeks using the average churn and revenue numbers provided on GitLab. Generate a line plot to compare the five CLV curves. Are your results consistent with your answer to question 3? Why (or why not)? (6 points)
+
+NO. Actually, in the long term, 2 emails a weekperforms best. Because first, we use the average churn rate to calculate long-term clv and we can see that the average churn rate of 2-email is greatly smaller than that of 3-email but the differences between revenues are not too large. So in the long-term, the 2-email is very likely to perform better than 3-email. Second, the relationship between clv and churn rate is not linear, we can't depend the graph to predict the long-term tendency.
+
+### 5. Discuss at least two limitations of the current test. How would you address these limitations?(5points)
+
+
+a. In each week, we send only one of the seven products. If we change the product, the average churn rate will be different from the current one. So we could do tests to change the products we send to get the average churn rate and find the best frequency.
+
+b. Didn't consider seasonal effect. What if the test is done during Thansgiving or Christmas? The churn rate would be underestimated if the test is done in peak season or overestimated if in down season. So the test should be designed during common days to avoid seasonal effect. Otherwise, the churn rate should be adjusted.
+
+

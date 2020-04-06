@@ -1,0 +1,278 @@
+---
+title: "Home Alarm CLV"
+output: html_document
+---
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+library(tidyverse)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+Prepare "Home Alarm, Inc.: Assessing Customer Lifetime Value" for class discussion and as an individual assignment and submit the assignment through GitLab. Be VERY clear about where results are coming from and what assumptions you are making in your R code. It is in your best interest that we do not have to struggle to figure out where your numbers came from. The assignment (pdf) is on Canvas (week2/homealarm-clv.pdf). 
+
+
+## Setup
+
+Create an Rmarkdown document in which you calculate the CLV for a customer that uses auto-pay and for a customer that does not use auto-pay and answer question 1 through 4 in the assignment PDF.
+
+## Hints
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>. Go to http://commonmark.org/help/ for a 10-minute interactive Markdown tutorial
+
+When you click the **Knit** button in Rstudio, a document will be generated that includes both the text you type as well as the output of any embedded R-code chunks within the document.
+
+## Analysis
+
+#### By year:
+
+```{r}
+## Attrition notifications
+churn <- tibble::tibble(
+  no_autopay = c(0.084, 0.122, 0.162, 0.154, 0.134, 0.120, 0.111, 0.096, 0.086),
+  autopay = c(0.032, 0.070, 0.097, 0.103, 0.095, 0.078, 0.069, 0.059, 0.053)
+)
+rownames=c('Revenue','Service Cost','Marketing Cost','Customer Net Profit','Churn / Attrition rate','Prob. of being active at end of period','Profit expected on average','Discount','Present value of Expected Profits','CLV')
+
+#constant
+Annual_growth_rate=0.03
+Annual_discount_rate=0.1
+Cost_of_service=0.15
+Annual_marketing_cost=0.05
+
+rev_year1=480  # Because 30 is historical data which is nine years ago. So I didn't use 360 to be the first year revenue. Instead, I used 480 as the first year revenue. 
+
+num_of_year=8
+
+#calculate the rows:
+revenue=vector()
+for (i in 1:num_of_year){
+  revenue[i]=rev_year1*(1+Annual_growth_rate)^(i-1)
+}
+#cost:
+service_cost= revenue*Cost_of_service
+marketing_cost=revenue*Annual_marketing_cost
+
+#profit:
+Customer_Net_Profit=revenue-service_cost-marketing_cost
+
+#churn:
+no_autopay_churn = c(0.122, 0.162, 0.154, 0.134, 0.120, 0.111, 0.096,0.086)
+autopay_churn = c(0.070, 0.097, 0.103, 0.095, 0.078, 0.069, 0.059,0.053)
+
+#retention rate:
+prob_retend=vector()
+for (i in 1:(num_of_year-1)){
+  prob_retend[1]=1
+  i=i+1
+  prob_retend[i]=prob_retend[i-1]*(1-autopay_churn[i-1])
+}
+
+prob_retend_nonauto=vector()
+for (i in 1:(num_of_year-1)){
+  prob_retend_nonauto[1]=1
+  i=i+1
+  prob_retend_nonauto[i]=prob_retend_nonauto[i-1]*(1-no_autopay_churn[i-1])
+}
+
+#expected profit:
+expected_profit=prob_retend*Customer_Net_Profit
+
+expected_profit_nonauto=prob_retend_nonauto*Customer_Net_Profit
+
+
+#discount: Because we are standing at the end of year1, to discount year2's revenue to year1, we use 1 year as the discount number. There's no need to discount year1 to year1, so the beginning number is 0.
+
+discount=1:num_of_year 
+
+#discounted value:
+discounted_value=expected_profit/(1+Annual_discount_rate)^discount
+discounted_value_nonauto=expected_profit_nonauto/(1+Annual_discount_rate)^discount
+
+#CLV:
+clv=vector()
+for (i in 1:num_of_year){
+  clv[i]=sum(discounted_value[1:i])
+}
+
+clv_nonauto=vector()
+for (i in 1:num_of_year){
+  clv_nonauto[i]=sum(discounted_value_nonauto[1:i])
+}
+
+
+# combine into a table:
+autopaytable=data.frame(Revenue=revenue,`Service Cost`=service_cost,`Marketing Cost`=marketing_cost,`Customer Net Profit`=Customer_Net_Profit,`Churn / Attrition rate`=autopay_churn,`Prob. of being active at end of period`=prob_retend,`Profit expected on average`=expected_profit,Discount=discount,`Present value of Expected Profits`=discounted_value,CLV=clv)
+
+auto_pay= t(autopaytable)
+colnames(auto_pay)=c('year2','year3','year4','year5','year6','year7','year8','year9')
+auto_pay=data.frame(auto_pay)
+
+# non-autopay
+non_autopaytable=data.frame(Revenue=revenue,`Service Cost`=service_cost,`Marketing Cost`=marketing_cost,`Customer Net Profit`=Customer_Net_Profit,`Churn / Attrition rate`=no_autopay_churn,`Prob. of being active at end of period`=prob_retend_nonauto,`Profit expected on average`=expected_profit_nonauto,Discount=discount,`Present value of Expected Profits`=discounted_value_nonauto,CLV=clv_nonauto)
+
+non_auto_pay= t(non_autopaytable)
+colnames(non_auto_pay)=c('year2','year3','year4','year5','year6','year7','year8','year9')
+non_auto_pay=data.frame(non_auto_pay)
+```
+
+#### By month:
+
+```{r}
+Monthly_discount_rate=(1+Annual_discount_rate)^(1/12)-1
+number_month=8*12
+month_rev=revenue/12
+
+month_revenue=list()
+for (i in 1:num_of_year){
+  month_revenue[[i]]=rep(month_rev[i],12)
+}
+month_revenue=unlist(month_revenue)
+
+
+#cost:
+service_cost_monthly= month_revenue*Cost_of_service
+marketing_cost_monthly=month_revenue*Annual_marketing_cost
+
+
+#profit:
+Customer_Net_Profit_monthly=month_revenue-service_cost_monthly-marketing_cost_monthly
+
+
+# retention rate monthly:
+auto_retention_rate_monthly=list()
+for (i in 1:num_of_year){
+  auto_retention_rate_monthly[[i]]=rep(prob_retend[i],12)
+}
+auto_retention_rate_monthly=unlist(auto_retention_rate_monthly)
+
+nonauto_retention_rate_monthly=list()
+for (i in 1:num_of_year){
+  nonauto_retention_rate_monthly[[i]]=rep(prob_retend_nonauto[i],12)
+}
+nonauto_retention_rate_monthly=unlist(nonauto_retention_rate_monthly)
+
+#expected profit:
+expected_profit_monthly=auto_retention_rate_monthly*Customer_Net_Profit_monthly
+expected_profit_nonauto_monthly=nonauto_retention_rate_monthly*Customer_Net_Profit_monthly
+
+#discount month:
+discount_monthnumber=1:number_month
+
+#pv:
+present_value_auto_monthly=expected_profit_monthly/(1+Monthly_discount_rate)^discount_monthnumber
+present_value_nonauto_monthly=expected_profit_nonauto_monthly/(1+Monthly_discount_rate)^discount_monthnumber
+
+#clv monthly:
+clv_auto_month=vector()
+for (i in 1:number_month){
+  clv_auto_month[i]=sum(present_value_auto_monthly[1:i])
+}
+
+clv_nonauto_month=vector()
+for (i in 1:number_month){
+  clv_nonauto_month[i]=sum(present_value_nonauto_monthly[1:i])
+}
+
+# combine into a table:
+autopaytable_month=data.frame(Revenue=month_revenue,`Service Cost`=service_cost_monthly,`Marketing Cost`=marketing_cost_monthly,`Customer Net Profit`=Customer_Net_Profit_monthly,`Prob. of being active at end of period`=auto_retention_rate_monthly,`Profit expected on average`=expected_profit_monthly,Discount=discount_monthnumber,`Present value of Expected Profits`=present_value_auto_monthly,CLV=clv_auto_month)
+
+auto_pay_month= t(autopaytable_month)
+
+auto_pay_month=data.frame(auto_pay_month)
+
+# non-autopay
+nonautopaytable_month=data.frame(Revenue=month_revenue,`Service Cost`=service_cost_monthly,`Marketing Cost`=marketing_cost_monthly,`Customer Net Profit`=Customer_Net_Profit_monthly,`Prob. of being active at end of period`=nonauto_retention_rate_monthly,`Profit expected on average`=expected_profit_nonauto_monthly,Discount=discount_monthnumber,`Present value of Expected Profits`=present_value_nonauto_monthly,CLV=clv_nonauto_month)
+
+nonauto_pay_month= t(nonautopaytable_month)
+
+nonauto_pay_month=data.frame(nonauto_pay_month)
+
+```
+
+1. What is the CLV (looking 8 years out) of a customer who uses auto-pay? (9 points)
+$1803.66
+
+```{r}
+auto_pay_month[9,96]
+```
+
+2. What is the CLV (looking 8 years out) of a customer who does not use auto-pay? (9 points)
+$ 1553.723
+
+```{r}
+nonauto_pay_month[9,96]
+```
+3. What is the maximum amount Home Alarm should spend on incentives to convert an existing customer to auto-pay? (6 points)
+Taking a 8-year time horizon,the maximum amount is $318.08 because we expect to earn $249.937 more from an auto-pay customer.
+
+```{r}
+auto_pay_month[9,96]-nonauto_pay_month[9,96]
+```
+
+
+4. Suggest at least three marketing actions Home Alarm should consider to convert existing
+customers to auto-pay who are about to start their second year with Home Alarm. Be
+specific about incentive amounts you recommend using (if any). (6 points)
+
+(1) Give one-time discount/gift. For example, renew a contract of auto-pay and if continue the contract for year3, get $16.99 discount immediately.Renew a contract until year4, get a $48.83 discount. Or the company could give the customer equal-valued gifts. The longer the customer sign the contract, the more discount/expensive gifts he could get.
+
+```{r}
+clv_diff=auto_pay[10,]-non_auto_pay[10,]
+clv_diff
+
+```
+
+
+(2) Give monthly cash back. For example, renew a contract of auto-pay and if continue the contract for year3, after each payment, the company will give the customer $1.54 cash back each month. The longer the customer sign the contract, the more cash-rewards he could get.
+
+```{r}
+clv_diff_permonth=auto_pay_month[9,]-nonauto_pay_month[9,]
+clv_diff_permonth
+
+```
+
+(3) Combine the two methods. For example, renew a contract of auto-pay for year3, first, get $4.99 discount or an equally valued gift immediately. Then get $1 cash reward each month. $1*12+$4.99=$16.99, which is equal to the difference of CLV in year3.
+
+

@@ -1,0 +1,131 @@
+
+```{r}
+number_bins <- 5
+
+breakeven_rate <- ((1.41 / 60))
+
+intuit_training <- intuit75k %>%
+  filter(training == "1")
+
+intuit_training$rec_iq <- xtile(intuit_training$last, number_bins)
+intuit_training$freq_iq <- xtile(intuit_training$numords, number_bins, rev = T)
+intuit_training$mon_iq <- xtile(intuit_training$dollars, number_bins, rev = T)
+intuit_training$rfm_iq <- paste0(intuit_training$rec_iq, intuit_training$freq_iq, intuit_training$mon_iq)
+
+intuit_training$rec_sq <- xtile(intuit_training$last, number_bins)
+intuit_training <- intuit_training %>%
+  group_by(rec_sq) %>%
+  mutate(freq_sq = xtile(numords, number_bins, rev = T)) %>%
+  ungroup()
+intuit_training <- intuit_training %>%
+  group_by(rec_sq, freq_sq) %>%
+  mutate(mon_sq = xtile(dollars, number_bins, rev = T)) %>%
+  ungroup()
+intuit_training$rfm_sq <- paste0(intuit_training$rec_sq, intuit_training$freq_sq, intuit_training$mon_sq)
+
+intuit_training <- intuit_training %>%
+  group_by(rfm_iq) %>%
+  mutate(iq_rate = mean(res1 == "Yes"), iq_rate_lb = (mean(res1 == "Yes") - 1.64 * seprop(res1 == "Yes")), iq_rate_ub = (mean(res1 == "Yes") + 1.64 * seprop(res1 == "Yes"))) %>%
+  mutate(send_iq = iq_rate > breakeven_rate, send_iq_lb = iq_rate_lb > breakeven_rate, send_iq_ub = iq_rate_ub > breakeven_rate) %>%
+  ungroup()
+
+intuit_training <- intuit_training %>%
+  group_by(rfm_sq) %>%
+  mutate(sq_rate = mean(res1 == "Yes"), sq_rate_lb = (mean(res1 == "Yes") - 1.64 * seprop(res1 == "Yes")), sq_rate_ub = (mean(res1 == "Yes") + 1.64 * seprop(res1 == "Yes"))) %>%
+  mutate(send_sq = sq_rate > breakeven_rate, send_sq_lb = sq_rate_lb > breakeven_rate, send_sq_ub = sq_rate_ub > breakeven_rate) %>%
+  ungroup()
+```
+
+
+```{r}
+intuit75k_test <- intuit75k %>%
+  filter(intuit75k$training == "0")
+
+intuit75k_test$rec_iq <- xtile(intuit75k_test$last, number_bins)
+intuit75k_test$freq_iq <- xtile(intuit75k_test$numords, number_bins, rev = T)
+intuit75k_test$mon_iq <- xtile(intuit75k_test$dollars, number_bins, rev = T)
+intuit75k_test$rfm_iq <- paste0(intuit75k_test$rec_iq, intuit75k_test$freq_iq, intuit75k_test$mon_iq)
+
+intuit75k_test$rec_sq <- xtile(intuit75k_test$last, number_bins)
+intuit75k_test <- intuit75k_test %>%
+  group_by(rec_sq) %>%
+  mutate(freq_sq = xtile(numords, number_bins, rev = T)) %>%
+  ungroup()
+intuit75k_test <- intuit75k_test %>%
+  group_by(rec_sq, freq_sq) %>%
+  mutate(mon_sq = xtile(dollars, number_bins, rev = T)) %>%
+  ungroup()
+intuit75k_test$rfm_sq <- paste0(intuit75k_test$rec_sq, intuit75k_test$freq_sq, intuit75k_test$mon_sq)
+
+intuit75k_test <- intuit75k_test %>%
+  left_join(
+    intuit_training %>%
+      select(rfm_iq, iq_rate, send_iq, iq_rate_lb, send_iq_lb, iq_rate_ub, send_iq_ub) %>%
+      unique()
+  )
+
+intuit75k_test <- intuit75k_test %>%
+  left_join(intuit_training %>%
+    select(rfm_sq, sq_rate, send_sq, sq_rate_lb, send_sq_lb, sq_rate_ub, send_sq_ub) %>%
+    unique())
+```
+
+# Profit Calculation
+
+```{r}
+
+profit_iq <- data.frame(method = "profit_iq", profit = (sum(intuit75k_test$res1 == "Yes" & intuit75k_test$send_iq == T) * 60 - sum(intuit75k_test$send_iq == T) * 1.41))
+
+profit_iq_lb <- data.frame(method = "profit_iq_lb", profit = sum(intuit75k_test$res1 == "Yes" & intuit75k_test$send_iq_lb == T) * 60 - sum(intuit75k_test$send_iq_lb == T) * 1.41)
+profit_iq_ub <- data.frame(method = "profit_iq_ub", profit = sum(intuit75k_test$res1 == "Yes" & intuit75k_test$send_iq_ub == T) * 60 - sum(intuit75k_test$send_iq_ub == T) * 1.41)
+
+profit_sq <- data.frame(method = "profit_sq", profit = sum(intuit75k_test$res1 == "Yes" & intuit75k_test$send_sq == T) * 60 - sum(intuit75k_test$send_sq == T) * 1.41)
+profit_sq_lb <- data.frame(method = "profit_sq_lb", profit = sum(intuit75k_test$res1 == "Yes" & intuit75k_test$send_sq_lb == T) * 60 - sum(intuit75k_test$send_sq_lb == T) * 1.41)
+profit_sq_ub <- data.frame(method = "profit_sq_ub", profit = sum(intuit75k_test$res1 == "Yes" & intuit75k_test$send_sq_ub == T) * 60 - sum(intuit75k_test$send_sq_ub == T) * 1.41)
+
+profit <- data.frame(rbind(profit_iq, profit_iq_lb, profit_iq_ub, profit_sq, profit_sq_lb, profit_sq_ub))
+
+profit %>%
+  ggplot(aes(x = method, y = profit, fill = method, label = profit)) +
+  geom_bar(stat = "identity") +
+  geom_text() +
+  labs(x = "Model", y = "Profit", title = paste("Profit by Model with ", number_bins, " bins"))
+```
+
+# Accuracy of Model
+
+```{r}
+
+tp <- sum(intuit75k_test$send_sq_ub == T & intuit75k_test$res1 == "Yes")
+fp <- sum(intuit75k_test$send_sq_ub == T & intuit75k_test$res1 == "No")
+tn <- sum(intuit75k_test$send_sq_ub == F & intuit75k_test$res1 == "No")
+fn <- sum(intuit75k_test$send_sq_ub == F & intuit75k_test$res1 == "Yes")
+
+accuracy <- (tp + tn) / (tp + tn + fp + fn)
+
+print(paste0("Accuracy for the sq ub model ", accuracy))
+```
+
+# ROME
+
+```{r}
+
+rome_iq <- data.frame("method" = "rome_iq", "ROME" = (profit_iq[[1, 2]] / (sum(intuit75k_test$send_sq == T) * 1.41)))
+rome_iq_lb <- data.frame("method" = "rome_iq_lb", "ROME" = profit_iq_lb[[1, 2]] / (sum(intuit75k_test$send_iq_lb == T) * 1.41))
+rome_iq_ub <- data.frame("method" = "rome_iq_ub", "ROME" = profit_iq_ub[[1, 2]] / (sum(intuit75k_test$send_iq_ub) * 1.41))
+
+rome_sq <- data.frame("method" = "rome_sq", "ROME" = profit_sq[[1, 2]] / (sum(intuit75k_test$send_sq == T) * 1.41))
+rome_sq_lb <- data.frame("method" = "rome_sq_lb", "ROME" = profit_sq_lb[[1, 2]] / (sum(intuit75k_test$send_sq_lb == T) * 1.41))
+rome_sq_ub <- data.frame("method" = "rome_sq_ub", "ROME" = profit_sq_ub[[1, 2]] / (sum(intuit75k_test$send_sq_ub == T) * 1.41))
+
+rome <- rbind(rome_iq, rome_iq_lb, rome_iq_ub, rome_sq, rome_sq_lb, rome_sq_ub)
+rome$ROME <- round(rome$ROME, 2)
+
+rome %>%
+  ggplot(aes(x = method, y = ROME, fill = method, label = ROME)) +
+  geom_bar(stat = "identity") +
+  geom_text() +
+  labs(x = "Model", y = "ROME", title = "ROME per model")
+
+```
+

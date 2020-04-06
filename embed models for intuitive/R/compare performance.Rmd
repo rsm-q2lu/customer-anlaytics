@@ -1,0 +1,62 @@
+
+#### performance comparing,choose a model. What criteria did you use to decide which customers should receive the wave-2 mailing?
+
+```{r}
+## Compare gains plot of logistic and deep learning model.
+
+intuit75k=intuit75k %>% mutate(label=ifelse(res1=='Yes',1,0)) %>% mutate(recency=last,frequency=numords,monetary=dollars,log_dollars=log(dollars),std_numords=standardize(numords),std_last =standardize(last),std_dollars=standardize(dollars),std_sincepurch=standardize(sincepurch))
+intuit75k_train=intuit75k%>% filter(training==1)
+intuit75k_test=intuit75k%>% filter(training==0)
+
+## logit cumulative lift gains(on train and test)
+
+#define a chart function
+gain_chart=function(df,colname,colcontent){
+df = df%>% mutate(dec_logit=xtile(!! colname,10,rev=TRUE))
+dec_df_logit= df %>% group_by(dec_logit) %>% summarize(number_mails=n(),number_click=sum(label),click_through_rate=number_click/number_mails)
+dec_df_logit_gain= dec_df_logit %>% mutate(cum_number_mail=cumsum(number_mails),
+                                      cum_number_click=cumsum(number_click),
+                                      gains=number_click/sum(number_click),
+                                      cum_gains=cum_number_click/sum(number_click)
+                                      )  
+
+dec_df_logit_gain2=dec_df_logit_gain%>% rbind(rep(0,8)) %>% select('dec_logit','cum_gains') %>% mutate(method=colcontent)
+
+return(dec_df_logit_gain2)
+}
+
+#lg on train and test data
+f1 = label ~ zip_state+sex+ bizflag+ std_numords+std_last+std_dollars+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f1,data=intuit75k_train,family=binomial)
+
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+train_data=intuit75k_train%>%
+  mutate(click_logit=predict(glm.fits, newdata = intuit75k_train, type = "response"),pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+
+train_lg_gain=gain_chart(train_data,quo(click_logit),"click_logit")
+test_lg_gain=gain_chart(test_data,quo(click_logit),"click_logit")
+
+## nn's gain on train and test data:
+train_nn_gain=gain_chart(train_data_nn,quo(click_logit),"nn_r")
+test_nn_gain=gain_chart(test_data_nn,quo(click_logit),"nn_r")
+
+
+##compare table
+compare_gains_train=rbind(train_lg_gain,train_nn_gain)
+compare_gains_test=rbind(test_lg_gain,test_nn_gain)
+
+plot_train=compare_gains_train%>%ggplot(aes(x=dec_logit/10,y=cum_gains,group=method,color=method))+geom_line()+geom_point(size=3)+labs(x='Proportion of customers',y='cumulative gain',title='on train data')+scale_y_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) +scale_x_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) + geom_abline(intercept=0,slope=1)
+
+plot_train
+
+plot_test=compare_gains_test%>%ggplot(aes(x=dec_logit/10,y=cum_gains,group=method,color=method))+geom_line()+geom_point(size=3)+labs(x='Proportion of customers',y='cumulative gain',title='on test data')+scale_y_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) +scale_x_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) + geom_abline(intercept=0,slope=1)
+
+plot_test
+
+```

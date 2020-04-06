@@ -1,0 +1,20 @@
+
+```{r}
+# using FRM index
+
+intuit75k_test_frm=intuit75k_test_frm%>% mutate(state=intuit75k_train$zip_state,label=ifelse(res1=='Yes',1,0))
+intuit75k_train_frm=intuit75k_test_frm %>% mutate(state=intuit75k_test$zip_state,label=ifelse(res1=='Yes',1,0)) 
+
+f_frmindex = label ~ zip_state+sex+rfm_iq +bizflag+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f_frmindex,data=intuit75k_train_frm,family=binomial)
+
+click_logit=predict(glm.fits, newdata = intuit75k_test_frm, type = "response")
+
+test_frm=intuit75k_test_frm%>%
+  mutate(pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+
+logit_frmindex=calculate_prof_ROME(test_frm,pred_click,"logit_frmindex") #no difference between basic logistic regression
+
+```

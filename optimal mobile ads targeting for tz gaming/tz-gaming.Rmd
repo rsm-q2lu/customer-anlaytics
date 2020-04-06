@@ -1,0 +1,633 @@
+---
+title: "TZ Gaming: Optimal Targeting of Mobile Ads"
+output: html_document
+---
+
+* Name:Qiuyi LU
+* GitLab id: "rsm-q2lu "
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## load radiant packages if neededi
+if (!exists("r_environment")) library(radiant)
+library(tidyverse)
+library(glmnet)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document by answering the questions in `tz-gaming.pdf` on Canvas (week5/). Create a Notebook/HTML file with all your results and comments and push both the Rmarkdown and HTML file to GitLab when you are done. All results MUST be reproducible (i.e., the TA and I must be able to recreate the HTML from the Rmarkdown file without changes or errors).
+
+> Note: If you use Rstudio's git tab to push your submission to GitLab you may see warnings or messages when pushing the HTML file because of its size. To avoid these messages you can also push your files to GitLab by using GitGadget's "Sync" tab (i.e., Commit your changes and then Push). 
+
+```{r}
+## loading the data - this dataset must NOT be changed
+tz_gaming <- readr::read_rds("data/tz_gaming.rds")
+radiant.data::describe(tz_gaming)
+```
+
+## Question answers
+
+```{r}
+tz_gaming=tz_gaming %>% mutate(label=ifelse(click == 'no',0,1))
+
+traindata=tz_gaming[tz_gaming$training=='train',]
+testdata=tz_gaming[tz_gaming$training=='test',]
+
+
+```
+
+
+
+### Part I: Logistic Regression (10 points) 
+#### a.predict the probability of click == "yes" on total data
+
+```{r}
+
+f1 = label ~ impup+ clup+ ctrup+ impua+ clua+ ctrua+ imput+ clut+ ctrut+ imppat+ clpat+ctrpat
+
+
+glm.fits=glm(formula=f1,data=traindata,family=binomial)
+summary(glm.fits)
+
+click_logit=predict(glm.fits, newdata = tz_gaming, type = "response")
+
+
+OR=exp(coef(glm.fits))
+cbind(OR,coefficient=coef(glm.fits))
+```
+##### The regression output shows that these variables: clup, ctrup, ctrua, imput, clut, ctrut, imppat, clpat, ctrpat are statistically significant predictor of customer purchase. Only 2 variables impup and clua are not significant.
+#####  ctrpat seems to be the most “important” becasue its absolute value of coefficient is larger than others.
+##### For example, the coefficient of clup from the logistic regression is 0.00976 and the odds ratio is equal to 1.009808 (i.e., e^ 0.00976). Because the odds ratio is larger than 1, a higher number of past impressions the user has clicked on in the app is associated with higher odds of click. If the odds ratio is smaller than 1, then a higher number of the variable(such as impua,imput , imppat) is associated with a lower odds of click.
+##### Also, because these p.value for the coefficient is smaller than 0.05, we conclude that (1) the coefficients are statistically significantly different from 0 and (2) the odds ratios are statistically significantly different from 1. An odds ratio of 1 is equivalent to a coefficient estimate of 0 in a linear regression and implies that the explanatory (or predictor) variable has no effect on the response variable. The estimated odds ratio of 1.009808 suggests that the odds of click increase by 0.98% for each  clup increase.
+
+### Part II: Decile Analysis of Logistic Regression Results (10 points)
+
+#### a. Assign each impression to a decile based on the predicted probability of click through. Create a new variable dec_logit that captures this information. Note: The first decile should have the highest average click-through rate. If not, make sure to “reverse” the decile numbers (i.e., 10 becomes 1, 9 becomes 2, etc.). Please use the xtile function to create the deciles.
+
+```{r}
+testdata$pred_pro=predict(glm.fits, newdata = testdata, type = "response")
+testdata = testdata%>% mutate(dec_logit=xtile(pred_pro,10,rev=TRUE))
+
+```
+
+#### b. Create a bar chart of click-through rates per decile (i.e., use dec_logit as the x-variable and click == "yes" as the y-variable). Note that the “click through rate” is not the same as the “predicted probability of click.” The click through rate captures the proportion of impressions in a given group (e.g., in a decile) that actually resulted in a click.
+
+```{r}
+visualize(testdata,
+        xvar = "dec_logit",
+  yvar = "click",
+  type = "bar",
+  labs = list(
+    y = "Proportion of click = 'yes'", 
+    x = "dec of probability of click"
+  ),
+  custom = FALSE
+)
+```
+
+
+#### c. Report the number of impressions, the number of clicks, and the click-through rate for the TZ ad per decile and save this information to a dataframe. Use the name dec_df_logit for the new data frame
+
+
+```{r}
+
+dec_df_logit= testdata %>% group_by(dec_logit) %>% summarize(number_impression=n(),number_click=sum(label),click_through_rate=number_click/number_impression)
+```
+
+
+#### d. Estimate a logistic regression model with click as the response variable and imppat, clpat, and ctrpat as the only explanatory variable. Make sure to “standardize” the explanatory variables before estimation. What is the interpretation of the standardized odds-ratios for the explanatory variables? 
+
+```{r}
+
+traindata_std=traindata %>% mutate(std_imppat=standardize(imppat), std_clpat=standardize(clpat),std_ctrpat=standardize(ctrpat))
+
+result2= radiant.model::logistic(traindata_std,rvar='click',evar=c('std_imppat','std_clpat','std_ctrpat'),lev='yes')
+summary(result2)
+
+
+
+```
+
+##### It means if a variable is further from its mean value, the odds of clicking the ad will increase or decrease. For example, the odds ratio of standardized imppat is equal to 0.366.  Because the odds ratio is smaller than 1, the further imppat(Number of past impressions that showed the TZ ad in the app in the hour) leave from its mean, the lower odds of click. The estimated odds ratio of 0.366 suggests that the odds of click decrease by about 64% for each standard deviation of imppat increase.
+
+#### e. Q: Some of the variables in the dataset are highly correlated with each other. In particular, imppat  and clpat have a positive correlation of 0.97. Discuss the implications of this (very) high level of collinearity and also different approaches to deal with it. 
+
+##### The collinearity will decrease the effectivess of the model. The ways to solve it are (1) to drop some variable and see if the result of the model is improved. (2) use PCA or other feature engineering methods to reduce the dimension of features such as create a new feature of ratio to represent two original features.
+
+#### Q: What are the implications for the model and the interpretation of the estimated (standardized) coefficients? 
+
+##### By standardizing the explanatory variables before estimation we can see which variables move-the-needle most. For example, the coefficient of std_imppat from the logistic regression is -1.00496 and the odds ratio is equal to 0.3660593 (i.e., e^-1.00496).  Because the odds ratio is smaller than 1, the further imppat(Number of past impressions that showed the TZ ad in the app in the hour) leave from its mean, the lower odds of click. The estimated odds ratio of 0.3660593 suggests that the odds of click decrease by about 64% for each standard deviation of imppat increase.
+
+
+#### Q: As part of your answer, discuss the change in the estimated (standardized) odd-ratio for imppat when you remove clpat from the model.
+
+
+```{r}
+
+#remove clpat from the model.
+
+result3= radiant.model::logistic(traindata_std,rvar='click',evar=c('std_imppat','std_ctrpat'),lev='yes')
+summary(result3)
+
+
+```
+
+##### After removing clpat,the coefficient of std_imppat is 0.24358, the odds ratio is equal to 1.188307 (e^0.17253). The change of the odds ratio is 1.188307-0.3660593=0.8222477.
+
+
+#### f. Estimate another logistic regression model with click as the response variable and time_fct, app, imppat, clpat, and ctrpat as the explanatory variable. 
+
+```{r}
+result4= radiant.model::logistic(traindata,rvar='click',evar=c('imppat','ctrpat','clpat','time_fct','app'),lev='yes')
+summary(result4)
+
+```
+#### Why are the odds ratios for imppat, clpat, and ctrpat different in the two models? Please be specific and investigate beyond simply stating the statistical problem.
+
+##### The previous results is an average result which didn't distinguish different app and time. But the odds ratios in the later model are comparing with the base odds ratio of time_fct1 and appapp1. That's why the odds ratio of imppat, clpat, and ctrpat are all 1 because they are the base. 
+#### For example,in the previous result, the odds ratio of std_imppat is 0.366,which means for all time and app, on average, if imppat(Number of past impressions that showed the TZ ad in the app in the hour) leave from its mean by 1 unit, the odds of click decrease by 70%. But now the odds ratio of imppat is 1 because the impact of the imppat is scattered into different time and app. If it is time2 and app2, then if imppat increase by 1 unit, then the odds of click is lower than time1 and app1.
+
+
+#### Part III: Lift and Gains (5 points)
+
+##### a. Use the data frame you created in II.c above to generate a table with lift and cumulative lift numbers for each decile.
+
+```{r}
+dec_df_logit_lift= dec_df_logit %>% mutate(cum_number_impression=cumsum(number_impression),
+                                      cum_number_click=cumsum(number_click),
+                                      ave_click_through_rate=sum(number_click)/sum(number_impression),
+                                      lift=click_through_rate/ave_click_through_rate,
+                                      cum_click_through_rate=cum_number_click/cum_number_impression,
+                                      cum_lift=cum_click_through_rate/ave_click_through_rate,
+                                      
+                                      )
+
+dec_df_logit_lift
+```
+
+#### b. Create a ggplot (or matplotlib or altair) chart showing the cumulative lift per decile
+
+```{r}
+dec_df_logit_lift%>%ggplot(aes(x=dec_logit/10,y=cum_lift,group=1))+geom_line()+geom_point(size=3)+labs(x='Proportion of customers',y='cumulative lift')
+```
+
+#### c. Use the data frame you created in II.c above to generate a table with gains and cumulative gains numbers for each decile.
+
+
+```{r}
+dec_df_logit_gain= dec_df_logit %>% mutate(cum_number_impression=cumsum(number_impression),
+                                      cum_number_click=cumsum(number_click),
+                                      gains=number_click/sum(number_click),
+                                      cum_gains=cum_number_click/sum(number_click)
+                                      )  
+
+dec_df_logit_gain2=dec_df_logit_gain%>% rbind(rep(0,8))
+
+dec_df_logit_gain2%>%ggplot(aes(x=dec_logit/10,y=cum_gains,group=1))+geom_line()+geom_point(size=3)+labs(x='Proportion of customers',y='cumulative gain')+scale_y_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) +scale_x_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) + geom_abline(intercept=0,slope=1)
+```
+
+#### Part IV: Confusion matrix (5 points)
+
+a. Create a “confusion matrix” based on the predictions from the logistic regression model you estimatedabove for I.a. Again, use onlydata from the test set here (i.e., “training == ‘test’ ”). Use the financial assumptions mentioned above, and repeated in section V below, to determine an appropriate cut-off. Calculate “accuracy” based on the confusion matrix you created (see http://lab.rady.ucsd.edu/sawtooth/RBusinessAnalytics/logit_models.html for an example using R).
+
+```{r}
+
+#Use the financial assumptions mentioned above, and repeated in section V below, to determine an appropriate cut-off.
+#tz_gaming_user= tz_gaming %>% count(id) 
+cost_per_user=10/1000
+margin=25
+conversion=0.05
+cut_off=cost_per_user/margin/conversion
+
+
+## confusion matrix for f1
+test_data=testdata%>%
+  mutate(pred_click=ifelse(pred_pro > cut_off,'Pred.Click','Pred.Notclick'))
+
+conf.mat <- table(test_data$click,test_data$pred_click)
+
+accuracy=as.numeric(conf.mat[1,1]+conf.mat[2,2])/sum(conf.mat)
+accuracy
+
+
+
+```
+
+
+##### b. Calculate a confusion matrix based on predictions from a logistic regression with click as the response variable andrndas the onlyexplanatory variable.  As before, the model should be estimated ontraining sample (i.e., “training == ‘train’ ”). Generate predictions for all rows in the data and createthe confusion matrix based only on the test set (i.e., “training == ‘train’ ”). Calculate “accuracy”based on the confusion matrix you created.
+
+```{r}
+f5 = label ~ rnd
+
+glm.fits5=glm(formula=f5,data=traindata,family=binomial)
+
+tz_gaming$click_rnd=predict(glm.fits5, newdata = tz_gaming, type = "response")
+tz_gaming=tz_gaming %>% mutate(target_rnd=ifelse(click_rnd>cut_off,TRUE,FALSE))
+
+
+test_data5=testdata
+test_data5$pred_pro=predict(glm.fits5, newdata = testdata, type = "response")
+
+test_data5=test_data5%>%
+  mutate(pred_click=ifelse(pred_pro > cut_off,'Pred.Click','Pred.Notclick'))
+
+conf.mat2 <- table(test_data5$click,test_data5$pred_click)
+
+accuracy2=as.numeric(conf.mat2[1,1]+conf.mat2[2,2])/sum(conf.mat2)
+accuracy2
+
+```
+##### c. Discuss the similarities and differences between the two confusion matrices. Which model is best basedon the confusion matrix? Provide support for your conclusions.
+
+```{r}
+
+conf.mat
+conf.mat2
+
+```
+
+##### similarities : Most of the true clicks are predicted click by both of the models.
+##### differences  : Model two is more aggressive. It is more likely to predict click than model1. As a result, model 2's FP is higher and FN is lower. Model 1's accuracy and TN are higher,which is good. Model 2 has twice number of people who it predicted click but acctually they didn't click. So model two will waste more money than model one. 
+
+##### Model 1 is better than Model2 because, first, the most important factor is true positive. The difference of the two model is not large. One is 271 and one is 213. Then looking at the true negative, model two has 76 but model one has 17984. This means model one could help the company to save money to not target the people who won't click. And the overall accuracy of model one is 65% while model two is only 1.2%.So model one is better.
+
+
+
+##### d. Recalculate the confusion matrices from IV.a and IV.b using 0.5 as the cutoff. Based on these newmatrices, discuss again the similarities and differences. Which model is best based on the confusionmatrix? Provide support for your conclusions.
+
+```{r}
+
+## confusion matrix for IV.a
+newcutoff=0.5
+test_data_newcutoff=testdata%>%
+  mutate(pred_click=ifelse(pred_pro > newcutoff,'Pred.Click','Pred.Notclick'))
+
+conf.matNew <- table(test_data_newcutoff$click,test_data_newcutoff$pred_click)
+
+accuracyNew=as.numeric(conf.matNew[1,1]+conf.matNew[2,2])/sum(conf.matNew)
+accuracyNew
+
+
+test_data5_newcutoff=test_data5%>%
+  mutate(pred_click=ifelse(pred_pro > newcutoff,'Pred.Click','Pred.Notclick'))
+
+conf.mat2New <- table(test_data5_newcutoff$click,test_data5_newcutoff$pred_click)
+
+accuracy2New=as.numeric(conf.mat2New[2,1])/sum(conf.mat2New)
+accuracy2New
+
+
+conf.matNew
+conf.mat2New
+
+
+```
+##### similarities : Most of the data are predicted not click by both of the models.
+##### differences  : Model two is more conservative. It is more likely to predict not click than model1.  As a result, model 2's TN and accuracy are higher because in the data, most people didn't click. But model 2's FN is also higher. Model 1's TP is higher,which is good but FP is also higher.  
+
+##### Model 1 is better than Model2 because model two is a naive predictive model. It predict all not click. If we use the model, we won't send any ads to customers and how could we earn money? In terms of the matrics. First, the most important factor is true positive. Model two is zero and model one is 9. Then looking at the true negative, model two has 27682 but model one has 27661. The difference is only 21. It won't waste too much money for the company. In all, model one will help the company earn more money. 
+
+#### Part V: Profitability Analysis (5 points)
+##### a. What is the break-even response rate?
+
+```{r}
+cut_off
+
+```
+
+
+##### b. Create a new variable target_logit that is TRUE if the predicted click-through probability is greaterthan the break-even response rate and FALSE otherwise
+
+```{r}
+
+tz_gaming$click_logit=click_logit
+tz_gaming=tz_gaming%>% mutate(target_logit=ifelse(click_logit > cut_off,TRUE,FALSE))
+target_logit=tz_gaming$target_logit
+
+tz_gaming_test=tz_gaming%>% filter(training=='test')
+```
+
+
+##### c. For the test set (i.e, “training == ‘test’ ”), what is the expected profit (in dollars) and the expected return on marketing expenditures (ROME) if TZ used (1) no targeting, (2) purchased the data fromVneta and used the logistic regression from I.a for targeting, or (3) used Vneta’s data science consultingservices? You can use theclick_vnetavariable to create atarget_vnetavariable and calculate theexpected profit and the expected return on marketing expenditures
+
+##### no targeting:
+```{r}
+click_rnd=ifelse(test_data5$pred_click=='Pred.Click',TRUE,FALSE)
+
+conf.mat2
+
+cpm=10/1000
+revenue=conf.mat2[1,1]*margin*conversion
+cost=sum(click_rnd)*cpm
+exp_profit=revenue-cost
+print(paste0("The expected profit (in dollars) of no targeting is ",exp_profit))
+exp_ROME=exp_profit/cost
+print(paste0("The expected ROME  of no targeting is ",round(exp_ROME,2)))
+
+
+```
+
+##### purchased the data from Vneta and used the logistic regression from I.a for targeting:
+```{r}
+revenue=conf.mat[1,1]*margin*conversion
+
+cost= sum(tz_gaming_test$target_logit)*cpm
+exp_profit=revenue-cost
+print(paste0("The expected profit (in dollars) of targeting on our own is ",exp_profit))
+exp_ROME=exp_profit/cost
+print(paste0("The expected ROME of targeting on our own is ",round(exp_ROME,2)))
+```
+
+
+##### used Vneta’s data science consulting services? You can use the click_vneta variable to create a target_vneta variable and calculate the expected profit and the expected return on marketing expenditures
+
+```{r}
+tz_gaming_test=tz_gaming_test %>% mutate(target_vneta=ifelse(click_vneta>cut_off,TRUE,FALSE))
+TP=tz_gaming_test %>% filter(target_vneta==TRUE,label==1)
+
+revenue=nrow(TP)*margin*conversion
+
+cost= sum(tz_gaming_test$target_vneta)*cpm
+exp_profit=revenue-cost
+print(paste0("The expected profit (in dollars) of buying DS service is ",exp_profit))
+exp_ROME=exp_profit/cost
+print(paste0("The expected ROME of targeting buying DS service is ",round(exp_ROME,2)))
+
+```
+
+
+##### d. Predict the profit and ROME implications for each of the 3 options if TZ purchases 20-million impression  for the upcoming ad campaign? Use the results from (c) above to project the performance  implications.
+
+##### Here, I made the following assumptions about the 20M data: (1) assume the 20M data has the same overall click through rate as the current tz_game data(average_click_throughrate) without targeting (2)assume the true positive rate(TPR) and the rate of predicted true(pred_true_rate) of our model are the same as we calculated in the test data.
+
+
+```{r}
+DS_cost=150000
+purchase_cost=50000
+total=20000000
+
+
+#option1 no targeting:
+
+TP=conf.mat2[1,1]
+pred_true=sum(click_rnd)
+pred_true_rate=TP/pred_true
+revenue=pred_true_rate*total*margin*conversion
+
+cost= total*cpm
+other_cost=0
+exp_profit=revenue-cost-other_cost
+print(paste0("The expected profit (in dollars) of no targeting is ",exp_profit))
+exp_ROME=exp_profit/(cost+other_cost)
+print(paste0("The expected ROME of targeting no targeting is ",round(exp_ROME,2)))
+
+```
+
+```{r}
+#purchased the data from Vneta and used the logistic regression from I.a for targeting:
+TP=conf.mat[1,1]
+pred_true=sum(tz_gaming_test$target_logit)
+pred_true_rate=TP/pred_true
+revenue=pred_true_rate*total*margin*conversion
+
+other_cost=purchase_cost
+exp_profit=revenue-cost-other_cost
+print(paste0("The expected profit (in dollars) of targeting on our own is ",exp_profit))
+exp_ROME=exp_profit/(cost+other_cost)
+print(paste0("The expected ROME of targeting on our own is ",round(exp_ROME,2)))
+```
+
+```{r}
+#use ds 
+
+TP=tz_gaming_test %>% filter(target_vneta==TRUE,label==1)
+TP=nrow(TP)
+
+pred_true=sum(tz_gaming_test$target_vneta)
+pred_true_rate=TP/pred_true
+revenue=pred_true_rate*total*margin*conversion
+
+
+other_cost=DS_cost
+exp_profit=revenue-cost-other_cost
+print(paste0("The expected profit (in dollars) of buying DS service is ",exp_profit))
+exp_ROME=exp_profit/(cost+other_cost)
+print(paste0("The expected ROME of targeting buying DS service is ",round(exp_ROME,2)))
+
+```
+
+
+#### Part VI: Model comparison (10 points)
+
+##### Calculate the confidence interval for the predictions from the logistic regression model in 1.a. Now redo the calculations from V.b through V.d, adjusting for these errors. How do the results change?
+
+
+```{r}
+result_conf= radiant.model::logistic(traindata,rvar='click',evar=c('impup', 'clup', 'ctrup', 'impua','clua', 'ctrua','imput', 'clut', 'ctrut', 'imppat', 'clpat','ctrpat'),lev='yes')
+
+conf_logit=predict(result_conf, pred_data = tz_gaming, conf_lev = 0.9, se = TRUE)
+
+tz_gaming=tz_gaming%>% mutate(click_logit_lb=conf_logit$`5%`,click_logit_ub=conf_logit$`95%`)
+
+```
+
+##### Redo b:Create a new variable target_logit that is TRUE if the predicted click-through probability is greater than the break-even response rate and FALSE otherwise
+
+```{r}
+
+tz_gaming=tz_gaming%>%
+  mutate(target_logit_lb=ifelse(click_logit_lb > cut_off,TRUE,FALSE))
+target_logit_lb=tz_gaming$target_logit_lb
+
+tz_gaming_test_conf=tz_gaming%>% filter(training=='test')
+
+
+```
+
+
+##### redo c. For the test set (i.e, “training == ‘test’ ”), what is the expected profit (in dollars) and the expected return on marketing expenditures (ROME) if TZ used (1) no targeting, (2) purchased the data from Vneta and used the logistic regression from I.a for targeting, or (3) used Vneta’s data science consulting services? You can use the click_vneta variable to create a target_vneta variable and calculate the expected profit and the expected return on marketing expenditures
+
+```{r}
+##### purchased the data from Vneta and used the logistic regression from I.a for targeting:
+
+conf.mat.conf <- table(tz_gaming_test_conf$click,tz_gaming_test_conf$target_logit_lb)
+revenue=conf.mat.conf[1,2]*margin*conversion
+cost= sum(tz_gaming_test_conf$target_logit_lb)*cpm
+exp_profit=revenue-cost
+print(paste0("The expected profit (in dollars) of targeting on our own with lower bound is ",exp_profit))
+exp_ROME=exp_profit/cost
+print(paste0("The expected ROME of targeting on our own with lower bound is ",round(exp_ROME,2)))
+```
+
+##### d. Predict the profit and ROME implications for each of the 3 options if TZ purchases 20-million impression for the upcoming ad campaign? Use the results from (c) above to project the performance implications.
+
+```{r}
+#purchased the data from Vneta and used the logistic regression from I.a for targeting:
+TP=conf.mat.conf[1,2]
+pred_true=sum(tz_gaming_test_conf$target_logit_lb)
+pred_true_rate=TP/pred_true
+revenue=pred_true_rate*total*margin*conversion
+cost= total*cpm
+
+other_cost=purchase_cost
+exp_profit=revenue-cost-other_cost
+print(paste0("The expected profit (in dollars) of targeting on our own with lower bound is ",exp_profit))
+exp_ROME=exp_profit/(cost+other_cost)
+print(paste0("The expected ROME of targeting on our own with lower bound is ",round(exp_ROME,2)))
+```
+
+##### The test profit using logit_lb is slightly lower than not using the lower bound but logit_lb yields a higher expected profit in 20m impressions and ROME in both test and 20m impressions. 
+
+
+##### b. The calculations in V.b through V.d above are based on a model that did not include all available  variables. Not all variables may be relevant however. To at least give each variable available in the dataset a change of being included in the model, estimate a (“backward”) stepwise logistic regression model, starting with the following variables: 
+
+##### time_fct, app, impup, clup, ctrup, impua, clua, ctrua, imput, clut, ctrut, imppat, clpat Create a variable (click_logit_stepwise_pre) with predicted click-through probabilities from this model. Also create a variable (target_logit_stepwise) that is TRUE if the predicted click-through probability is greater than the break-even response rate and FALSE otherwise.
+
+```{r}
+stepwise <- logistic(
+  traindata, 
+  rvar = "click", 
+  evar = c(
+    "time_fct","app","impup", "clup", "ctrup","impua", "clua", "ctrua", "imput", "clut", "ctrut", "imppat", "clpat","ctrpat"
+  ), 
+  lev = "yes", 
+  check = "stepwise-backward"
+)
+
+click_logit_stepwise <- predict(stepwise, pred_data = tz_gaming)
+click_logit_step_pre=click_logit_stepwise$pred
+
+tz_gaming=tz_gaming %>% mutate(target_logit_stepwise=ifelse(click_logit_step_pre>cut_off,TRUE,FALSE),target_vneta=ifelse(click_vneta>cut_off,TRUE,FALSE))                        
+
+```
+
+
+#### c. You have now estimated 4 different models and also have the predictions from Vneta. Compare the performance of implications for all 5 models based on profit calculations as in V.b through V.d and a gains chart. Discuss which of these 5 models you would recommend to put into production.
+
+```{r}
+
+# define a profit,ROME function
+tz_gaming_test=tz_gaming %>% filter(training=='test')
+calculate_prof_ROME=function(dataf,colname,coltext,other_cost){
+  
+TP=tz_gaming_test %>%filter (!! colname==TRUE,label==1)
+revenue=nrow(TP)*margin*conversion
+cost= sum(tz_gaming_test[[coltext]])*cpm
+exp_profit=revenue-cost
+exp_ROME=exp_profit/cost
+testresult=data.frame(method=coltext,test_profit=exp_profit,test_ROME=round(exp_ROME,2))
+
+
+pred_true=sum(tz_gaming_test[[coltext]])
+pred_true_rate=nrow(TP)/pred_true
+revenue=pred_true_rate*total*margin*conversion
+
+cpm_cost=total*cpm
+exp_profit=revenue-cpm_cost-other_cost
+exp_ROME=exp_profit/(cpm_cost+other_cost)
+realresult=data.frame(expected_profit=exp_profit,expected_ROME=round(exp_ROME,2))
+tworesult=cbind(testresult,realresult)
+return(tworesult)
+}
+
+logit_stepwise=calculate_prof_ROME(tz_gaming_test,quo(target_logit_stepwise),"target_logit_stepwise",purchase_cost)
+logit_lb=calculate_prof_ROME(tz_gaming_test,quo(target_logit_lb),"target_logit_lb",purchase_cost)
+logit_rnd=calculate_prof_ROME(tz_gaming_test,quo(target_rnd),"target_rnd",0)
+logit_vneta=calculate_prof_ROME(tz_gaming_test,quo(target_vneta),"target_vneta",DS_cost)
+logit=calculate_prof_ROME(tz_gaming_test,quo(target_logit),"target_logit",purchase_cost)
+
+compare_profit_rome=rbind(logit_stepwise,logit_lb,logit_rnd,logit_vneta,logit) %>% arrange(desc(expected_profit))
+
+compare_profit_rome
+```
+
+##### In terms of the total profit on 20m impressions, buying the service of Vneta will yield the highest profit.
+##### In terms of the ROME on 20m impressions, using logistic regression adjusted with error will yield the highest return rate.
+
+
+```{r}
+#define a chart function
+gain_chart=function(df,colname,colcontent){
+df = df%>% mutate(dec_logit=xtile(!! colname,10,rev=TRUE))
+dec_df_logit= df %>% group_by(dec_logit) %>% summarize(number_impression=n(),number_click=sum(label),click_through_rate=number_click/number_impression)
+dec_df_logit_gain= dec_df_logit %>% mutate(cum_number_impression=cumsum(number_impression),
+                                      cum_number_click=cumsum(number_click),
+                                      gains=number_click/sum(number_click),
+                                      cum_gains=cum_number_click/sum(number_click)
+                                      )  
+
+dec_df_logit_gain2=dec_df_logit_gain%>% rbind(rep(0,8)) %>% select('dec_logit','cum_gains') %>% mutate(method=colcontent)
+
+return(dec_df_logit_gain2)
+}
+
+table_click_logit_lb=gain_chart(tz_gaming_test,quo(click_logit_lb),"click_logit_lb")
+table_click_logit=gain_chart(tz_gaming_test,quo(click_logit),"click_logit")
+
+table_click_rnd=gain_chart(tz_gaming_test,quo(click_rnd),"click_rnd")
+
+table_click_vneta=gain_chart(tz_gaming_test,quo(click_vneta),"click_vneta")
+
+table_click_logit_step_pre=gain_chart(tz_gaming_test,quo(click_logit_step_pre),"click_logit_step_pre")
+
+compare_gains=rbind(table_click_logit_lb,table_click_logit,table_click_logit_step_pre,table_click_rnd,table_click_vneta)
+
+
+
+
+```
+
+
+```{r}
+plot=compare_gains%>%ggplot(aes(x=dec_logit/10,y=cum_gains,group=method,color=method))+geom_line()+geom_point(size=3)+labs(x='Proportion of customers',y='cumulative gain')+scale_y_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) +scale_x_continuous(breaks=seq(0,1,0.25),expand = c(0, 0),limits = c(0,1)) + geom_abline(intercept=0,slope=1)
+
+plot
+
+```
+
+##### From the test data we could see that, among the 5 methods, as long as not randomly sending ads, targeting 25% of the customer could give us more than 60% accumulative gains. Looking at the slope, we could see that the cumulative gain of Vneta increases most slowly after targeting the 25% customers, which showed that they could target customers very precisely. The differences among logit, logit_lb and logit_stepwise are not obvious. After targeting half of the customer, they could have 80% of the cumulative gains.
+
+##### As a result, I recommend using the Vneta as the first choice because it is expected to yield the hightest profit if they buy 20m impressions. But if they just buy a small amount of the impressions, they should consider logit lowerbound. The shreshold could be further calculated.

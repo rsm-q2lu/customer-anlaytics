@@ -1,0 +1,186 @@
+---
+title: Tuango - RFM Analysis for Mobile App Push Messaging on the post roll-out data
+output: html_document
+---
+
+* Name:Qiuyi Lu
+* GitLab id: rsm-q2lu
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## make all required libraries available by loading radiant package if needed
+if (!exists("r_environment")) library(radiant)
+library(tidyverse)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document by answering question 14 in `tuango.pdf` on Canvas (week4/). The code block below loads the data you need for this second Rmarkdown file. Create an HTML file with all your results and answers and push both the Rmarkdown and HTML file to GitLab when you are done. All results MUST be reproducible (i.e., the TA and I must be able to recreate the Notebook/HTML from the Rmarkdown file without changes or errors).
+
+```{r}
+## loading the data - this dataset must NOT be changed
+tuango <- readRDS("data/tuango_post.rds")
+
+
+## calculate iq sq index
+tuango_post=tuango %>% mutate(
+rec_iq=xtile(recency,5),
+fre_iq=xtile(frequency,5,rev = TRUE),
+mon_iq=xtile(monetary,5,rev=TRUE),
+rfm_iq=paste0(rec_iq,fre_iq,mon_iq))
+
+tuango_post <- tuango_post %>% group_by(rec_iq) %>%
+  mutate(fre_sq = xtile(frequency, 5, rev = TRUE)) %>%
+  ungroup()
+
+## calculate sequential monetary quintiles
+ tuango_post<- tuango_post%>% group_by(rec_iq, fre_sq) %>%
+  mutate(mon_sq = xtile(monetary, 5, rev = TRUE)) %>%
+  ungroup()
+ 
+ tuango_post$rec_sq=tuango_post$rec_iq
+ tuango_post=tuango_post%>%mutate(rfm_sq=paste0(rec_sq,fre_sq,mon_sq))
+ tuango_post_train=tuango_post %>% filter(training==1)
+ tuango_post_test=tuango_post %>% filter(training==0)
+ 
+## conditions
+one_more= tuango_post_train[tuango_post_train$ordersize>1,]
+ave_amount=sum(one_more$ordersize)/nrow(one_more)
+cost_to_push=2.5
+margin_on_sales=ave_amount*0.5
+breakeven_respon=cost_to_push/margin_on_sales
+```
+
+```{r}
+mailto_iq=tuango_post_train %>% group_by(rfm_iq_pre) %>% mutate(mailto=mean(buyer=='yes')>breakeven_respon)
+
+mailto_sq=tuango_post_train %>% group_by(rfm_sq) %>% mutate(mailto=mean(buyer=='yes')>breakeven_respon)
+
+mailto_lbiq=tuango_post_train %>% group_by(rfm_iq_pre) %>% mutate(lb=mean(buyer=='yes')-1.64*seprop(buyer=='yes'), mailto=lb>breakeven_respon)
+
+mailto_lbsq=tuango_post_train %>% group_by(rfm_sq) %>% mutate(lb=mean(buyer=='yes')-1.64*seprop(buyer=='yes'), mailto=lb>breakeven_respon)
+
+
+tuango_perrfm=tuango_post_train %>% filter(buyer=='yes') %>% group_by(rfm_sq) %>% summarise(ave_amount=mean(ordersize)) %>% mutate(breakeven_respon=cost_to_push/(0.5*ave_amount))
+response_rate_perrfm=tuango_post_train %>% group_by(rfm_sq) %>% summarise(respon_rate=mean(buyer=='yes'))
+tuango_per_rfm=tuango_perrfm %>% left_join(response_rate_perrfm,by='rfm_sq') %>% filter(respon_rate>breakeven_respon) 
+
+```
+
+
+```{r}
+# function 
+profit_ROME_calc=function(df,intro){
+mailing_cost=nrow(df)*cost_to_push
+profit=sum(df$ordersize)*0.5-mailing_cost
+ROME=profit/mailing_cost
+real_iq=data.frame(intro,profit=profit,ROME=ROME)
+}
+
+# independent 
+mailed_list=mailto_iq %>% filter(mailto==TRUE) %>% select(rfm_iq_pre)
+tuango_test=tuango_post_test %>% filter(rfm_iq_pre %in% mailed_list$rfm_iq_pre)
+real_iq=profit_ROME_calc(tuango_test,intro='real_iq')
+
+ 
+# sq
+mailed_list= mailto_sq%>% filter(mailto==TRUE) %>% select(rfm_sq)
+tuango_test=tuango_post_test %>% filter(rfm_sq %in% mailed_list$rfm_sq)
+real_sq=profit_ROME_calc(intro='real_sq',tuango_test)
+
+# iq_se
+mailed_list=mailto_lbiq %>% filter(mailto==TRUE) %>% select(rfm_iq_pre)
+tuango_test=tuango_post_test %>% filter(rfm_iq_pre %in% mailed_list$rfm_iq_pre)
+real_iq_se=profit_ROME_calc(intro='real_iq_se',tuango_test)
+
+# sq_se
+
+mailed_list=mailto_lbsq %>% filter(mailto==TRUE) %>% select(rfm_sq)
+tuango_test=tuango_post_test %>% filter(rfm_sq %in% mailed_list$rfm_sq)
+real_sq_se=profit_ROME_calc(intro='real_sq_se',tuango_test) 
+ 
+# per_frm_sq
+mailed_list=tuango_per_rfm$rfm_sq
+tuango_test=tuango_post_test %>% filter(rfm_sq %in% mailed_list)
+real_per_frm_sq=profit_ROME_calc(intro='real_per_frm_sq',tuango_test)
+
+#compare table
+real_compare_table=rbind(real_iq,real_sq,real_iq_se,real_sq_se,real_per_frm_sq)
+print(real_compare_table)
+
+#profit bar chart:
+visualize(
+  real_compare_table,
+  xvar = "intro",
+  yvar = "profit",
+  type = "bar",
+  labs = list(
+    y = "profit", 
+    x = "intro"
+  ),
+  custom = FALSE
+)
+
+#ROME bar chart:
+visualize(
+  real_compare_table,
+  xvar = "intro",
+  yvar = "ROME",
+  type = "bar",
+  labs = list(
+    y = "ROME", 
+    x = "intro"
+  ),
+  custom = FALSE
+)
+```
+
+
+## Question answers
+
+
+In reality, using sequential FRM yielded highest profit. Second is by using per frm sq.<br/>
+In terms of ROME,using independent frm standandard error performed best.
+The rankings of profit and ROME are the same as the estimated answer.<br/>

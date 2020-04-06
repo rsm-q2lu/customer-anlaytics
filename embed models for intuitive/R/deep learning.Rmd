@@ -1,0 +1,178 @@
+
+```{r}
+library(nnet)
+library(caret)
+library(radiant)
+
+```
+
+```{r}
+intuit75k=readRDS('intuit75k_total.rds')
+rvar <- "res1"
+stand <- c("numords", "dollars", "sincepurch")
+other <- c("zip_state", "sex",)
+lev <- "Yes"
+
+colnames(intuit75k)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+result <- nn(
+  intuit75k_train, 
+  rvar = "res1", 
+  evar = c(
+    "sex", "bizflag","version1", "owntaxprod", "upgraded","zip_state","std_numords","std_last","std_dollars","std_sincepurch"
+  ), 
+  lev = "Yes", 
+  size=1,
+  decay=0.5,
+  seed=1234
+
+)
+
+cv.nn(result,size=1:5,decay=seq(0,0.5,0.1),fun=auc)
+```
+
+Because it took too long time to run cv.nn. We didn't run it when we knit. Please see the code in the RMD file and the output picture. decay=0.4,size=2 yielded the highest auc.
+
+![result of cross validation of NN](../data/deep learning.png)
+
+
+
+```{r}
+## Using decay=0.4,size=2
+
+nnmodel <- nn(
+  intuit75k_train, 
+  rvar = "res1", 
+  evar = c(
+    "sex", "bizflag","version1", "owntaxprod", "upgraded","zip_state","std_numords","std_last","std_dollars","std_sincepurch"
+  ), 
+  lev = "Yes", 
+  size=2,
+  decay=0.4,
+  seed=1234
+)
+
+pred_pro=predict(nnmodel, pred_data = intuit75k_test)
+
+test_data_nn=intuit75k_test%>%
+  mutate(click_logit=pred_pro$Prediction,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+pred_pro_train=predict(nnmodel, pred_data = intuit75k_train)
+train_data_nn=intuit75k_train%>%
+  mutate(click_logit=pred_pro_train$Prediction,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+
+deep_learning_r=calculate_prof_ROME(test_data_nn,pred_click,"deep_learning") 
+deep_learning_r
+
+```
+
+```{r}
+## Using decay=0.4,size=2
+
+#df_train_scaled <- scale_df(df_train, sf = 2)
+#str(df_train_scaled)
+
+
+nnmodel <- nn(
+  intuit75k_train, 
+  rvar = "res1", 
+  evar = c(
+    "sex", "bizflag","version1", "owntaxprod", "upgraded","zip_state","std_numords","std_last","std_dollars","std_sincepurch"
+  ), 
+  lev = "Yes", 
+  size=4,
+  decay=0.4,
+  seed=1234
+)
+
+pred_pro=predict(nnmodel, pred_data = intuit75k_test)
+
+test_data_nn=intuit75k_test%>%
+  mutate(click_logit=pred_pro$Prediction,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+pred_pro_train=predict(nnmodel, pred_data = intuit75k_train)
+train_data_nn=intuit75k_train%>%
+  mutate(click_logit=pred_pro_train$Prediction,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+
+deep_learning_r=calculate_prof_ROME(test_data_nn,pred_click,"deep_learning") 
+deep_learning_r
+
+```
+
+
+#### The profit of deep learning model is lower than the logistic model. But the auc is higher than the logistic models.
+
+```{r eval=FALSE, include=FALSE}
+# 100 times  each time with a different bootstrap sample of the data, i.e., sample 52,500 rows from the training data (with replacement) for each new sample. Store the predicted response probabilities for each bootstrap sample in a new dataframe. This dataframe should have `id` as the first column and then 100 columns with probability predictions.
+
+intuit75k =read_csv("../intuit75k_withstate.csv")
+
+
+intuit75k_train=intuit75k %>%filter(training==1)
+intuit75k_test=intuit75k %>%filter(training==0)%>%mutate(std_numords=standardize(numords),std_last=standardize(last),std_dollars=standardize(dollars),std_sincepurch=standardize(sincepurch)) %>% mutate(label=ifelse(res1=='Yes',1,0)) 
+
+total_nn_100=data.frame(id=intuit75k_test$id)
+
+set.seed(1234)
+for (i in 1:100){
+  table=sample_n(intuit75k_train,nrow(intuit75k_train),replace=T) %>% mutate(std_numords=standardize(numords),std_last=standardize(last),std_dollars=standardize(dollars),std_sincepurch=standardize(sincepurch))
+  
+  nnmodel <- nn(
+  table, 
+  rvar = "res1", 
+  evar = c(
+    "sex", "bizflag","version1", "owntaxprod", "upgraded","zip_state","std_numords","std_last","std_dollars","std_sincepurch"
+  ), 
+  lev = "Yes", 
+  size=2,
+  decay=0.4,
+  seed=1234
+)
+  pred=predict(nnmodel, pred_data = intuit75k_test)$Prediction
+  total_nn_100[paste("pred",i)]=pred
+}
+
+total_nn_100=saveRDS("../data/total_nn_100.rds")
+```
+
+Because it took too long time to run bootstrap. We didn't run it when we knit. Please see the code in the RMD file. We save the result and load it in the next chunk.
+
+```{r}
+# Next, calculate the 5th percentile of the predictions to use as the lower bound on the estimated probability. 
+
+total_nn_100=readRDS("../data/total_nn_100.rds")
+
+total_nn_100_sd= total_nn_100 %>% select(-id) 
+temp=as.matrix(total_nn_100_sd) 
+fifth=rowQuantiles(temp,probs = 0.05)
+sd=rowSds(temp)
+
+total_nn_100_sd= total_nn_100_sd %>% mutate(mean=rowSums(.)/100,sd=sd,lb_sd=mean-1.64*sd,lb_5percentile=fifth)
+total_nn_100_sd=cbind(id=intuit75k_test$id,total_nn_100_sd) #lower bound probability of deep learning
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=total_nn_100_sd$lb_sd,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+deep_learning_r_lb_sd=calculate_prof_ROME(test_data,pred_click,"deep_learning_r_lb") 
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=total_nn_100_sd$lb_5percentile,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+deep_learning_r_lb_5th=calculate_prof_ROME(test_data,pred_click,"deep_learning_r_lb_5th") 
+deep_learning_r_lb_5th
+
+```
+
+
+#### deep learning without lowerbound is better in profit. But still lower than logistic regression model.
+
+```{r}
+testdata=read_csv("../testdata.csv") %>% rename(click_logit=deeplearning_result)
+mlp=calculate_prof_ROME(testdata,pred_click,"mlp") 
+mlp
+```

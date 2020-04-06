@@ -1,0 +1,210 @@
+---
+title: Intuit Quickbooks Upgrade
+output: html_document
+---
+
+* Team-lead GitLab id:rsm-jcepela
+* Group number:
+* Group name:The Nameless
+* Team member names: Qiuyi Lu, Xi Jiang, Zhengyu Jiang, Jake Cepela
+
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 144,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## load radiant packages if needed
+if (!exists("r_environment")) library(radiant)
+library(tidyverse)
+library(glmnet)
+library(matrixStats)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+
+```{r}
+## loading the data (do NOT change the data)
+intuit75k <- readr::read_rds("../data/intuit75k.rds") 
+```
+
+
+## Question answers
+
+### 1. Describe how you developed your predictive models, and discuss predictive performance for each model
+
+### RFM
+```{r, child = "RFM.Rmd"}
+```
+
+#### To analyze how we could best target customers, we explored three different models: RFM, Logistic Regression, and Neural Network. 
+
+#### We started with the RFM model, looking both into independent and sequential binning. 
+#### Further, we broke those down with their breakeven rates and looked at the mean of the response rate, the upper bound of the response rate, and the lower bound of response rate using the standard error to account for variation. 
+#### We ran the model using different number of bins, with a low of four to a high of nine, to see if the profit would change. Comparing profit, we found that the model with seven bins came out to be the best. Using seven bins, however, had many bins with NA values as there were none in the training for it to predict off. We determined that using 5 bins and having values in all bins was more important, as the gain in profit was modest. Calculating the profit from these models, we found that the RFM model using sequential binning and the upper bound was the most profitable, at $34,409.79 (see exhibit 1). 
+
+#### The lowest profit was with independent binning and the lower bound threshold, which was $30,247.05(exhibit 1). 
+
+#### This reverse was true for the ROME, with the lowest profit having the highest ROME. The focus for this exercise was on profit so this was not a concern. 
+
+
+### Logistic Regression
+```{r,child="logistic_regression.Rmd"}
+```
+
+#### We then went into our logistic regression model. We wanted to look into doing this second to see if using the RFM binning from our best model as an explanatory variable would increase our logistic models’ performance. 
+
+#### Further, we investigated the binning of zip codes and determined we wanted those to be more granular. 
+#### To do this we took all zip codes and found out which state each was in and created a new column. Further, we standardized numeric variables, specifically numords, last, dollars, and sincepurch. With the new attributes calculated, we tried a few different variations of combinations to find which model performed the best. 
+
+#### Our model started simple and progressively became more complex. We added interactions(zip_state*sex), tried taking the log of dollars to account for the right skew, tried using the non-standardized data, used lasso, bootstrap, lowerbound and upperbound of the probability.
+
+#### Running different combinations of these, our best model came to use state, sex, the business flag, standardized number of orders, standardized dollars, standardized time since original Quickbooks purchase, standardized time since last order from Intuit Direct, if the owner purchased tax software, if the customer has version 1, and if the customer upgraded to version 2. 
+
+#### Looking to profit as a measure of performance, this model outperformed all other logistic regressions that we ran. The profit for this model was $38,289.54 with a ROME of 1.91. 
+
+
+### Deep learning
+```{r,child="deep learning.Rmd"}
+```
+
+#### Satisfied with the performance of our logistic, we went to use a neural network in both R and Python. We used the model that we found worked best during our exploration of the logistic regression as our base model. Here, we once again used bootstrap on our model in order to get the lower bound. We used decay and size in a range and used cross validation to find the best size and decay for our model. Once again, we looked to profit to measure performance. 
+
+#### The expected profit for a deep learning model came to be $37,894.56, which is lower than the logistic model. 
+
+
+### 2. How did you compare and evaluate different models? 
+
+```{r,child="compare performance.Rmd"}
+```
+
+#### Comparing all the models, we looked to see the profit that would have been generated on the test set had the model been used. Out of them, our best logistic regression model outperformed the RFM Model and the Neural Net model we created. 
+
+#### We also compared gains plot of logistic and deep learning model on both train and test data. There are no large difference between the two models. So finnally, we chose the logistic regression model because it yielded the highest profit.
+
+
+### 3. If you created new variables to include in the model, please describe these as well
+
+#### zip_state(see python notebook),interaction variable(sex*zip_state)
+
+
+### 4. What criteria did you use to decide which customers should receive the wave-2 mailing?
+
+#### using the logit model to predict the name list:
+
+```{r}
+intuit75k=readRDS("intuit75k_total.rds")
+intuit75k=intuit75k %>% mutate(label=ifelse(res1=='Yes',1,0)) %>% mutate(recency=last,frequency=numords,monetary=dollars,log_dollars=log(dollars),std_numords=standardize(numords),std_last =standardize(last),std_dollars=standardize(dollars),std_sincepurch=standardize(sincepurch))
+intuit75k_train=intuit75k%>% filter(training==1)
+intuit75k_test=intuit75k%>% filter(training==0)
+
+res1list=intuit75k_test %>% filter(res1=='Yes') %>% select(id)
+
+f1 = label ~ zip_state+sex+ bizflag+ std_numords+std_last+std_dollars+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f1,data=intuit75k_train,family=binomial)
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+
+wave2_mail=intuit75k_test%>%
+  mutate(click_logit=click_logit,mailto_wave2=ifelse(click_logit*0.5 > cut_off,TRUE,FALSE))  %>% select(id,mailto_wave2) 
+
+wave2_mail=wave2_mail %>% mutate(mailto_wave2_=ifelse(id %in% res1list$id,FALSE,mailto_wave2)) %>% select(id,mailto_wave2=mailto_wave2_)
+
+
+#write.csv(wave2_mail,"../data/Qiuyi_Xi_Zhengyu_Jake_TheNameless.csv",row.names = FALSE)
+```
+
+#### Our criteria for determining which customer should receive wave-2 mailing was based on using the best model, regarding profit, in order to predict who would respond to the mailer. This took into consideration that the response rate for the second wave would be estimated at 50% of the response rate for the first wave. The companies that we would send to in the file provided were a result of using our best logistic regression to predict who to send to. 
+
+
+### 5. How much profit do you anticipate from the wave-2 mailing?
+
+```{r}
+# first, calculate how many predicted true in 801,821-38,487=763,334 people
+
+total_number=801821-38487
+wave2_mailist=intuit75k %>% filter(training==0,res1=='No') 
+
+click_logit=predict(glm.fits, newdata = wave2_mailist, type = "response")
+
+wave2_mail=wave2_mailist%>%
+  mutate(click_logit=click_logit,pred_click=ifelse(click_logit*0.5 > cut_off,TRUE,FALSE))
+
+pred_true_wave2_mailist=mean(wave2_mail$pred_click)
+send_number=pred_true_wave2_mailist*total_number
+
+#total cost
+total_cost=1.41*send_number
+
+
+#profit
+
+f1 = label ~ zip_state+sex+ bizflag+ std_numords+std_last+std_dollars+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f1,data=intuit75k_train,family=binomial)
+
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+
+test_data=intuit75k_test%>%
+  mutate(pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+pred_true=sum(test_data$pred_click)
+TP=test_data %>%filter (pred_click==TRUE,label==1)
+TPrate=nrow(TP)/pred_true
+
+TP=TPrate*send_number
+
+pred_revenue=TP*margin
+exp_profit=pred_revenue-total_cost
+exp_ROME=exp_profit/total_cost
+
+print(paste0("The expected profit is ",exp_profit))
+```
+
+
+#### To calculate our expected profit, we first removed the businesses that responded to the original mailer from the total population we could send to. We then predicted whether or not someone in the test set would be sent to during the wave 1 mailing.  We took the response rate for that mailing (those that responded of the ones that we sent to), to use as the response rate for the next wave. Our model doubled the breakeven threshold already to account for the decrease in response during the second wave. We removed the 38,487 from the 801,821 to get 763,334 possible businesses to send to. We took the proportion of total 763,334 that we would send to and multiplied that by the response rate that we calculated in order to predict the profit we anticipate. For our cost, we took all of the businesses we predicted we would send to times the $1.41. Our estimated profit of the businesses left is $602,216.30.
+
+
+### 6. What did you learn about the type of businesses that are likely to upgrade?
+
+#### Looking at the businesses that ended up responding, we are able to summarize a few key points. The more orders a company made, how soon their last purchase was, how many much the company has spent in the last 36 months, if they owned the tax product, if they were still on version 1, and if they upgraded strongly determine whether or not they will upgrade to version 3. 
+
+#### Essentially, if they had a newer product or weren’t a consistent customer, they were less likely to upgrade to version 3. This is intuitive, as customers often have brand loyalty and don’t upgrade frequently if the product they have isn’t too out of date. The most prominent factor we found was with whether or not they had previously upgraded, which suggests that if they had upgraded once they would again. Next, the companies that were in version 1 were more likely to upgrade. In tandem, these suggest that the companies that were likely to upgrade were previous customers of the product and have used Quickbooks since version one.

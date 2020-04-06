@@ -1,0 +1,280 @@
+---
+title: "S-Mobile: Predicting Customer Churn"
+output: html_document
+---
+
+* Team-lead gitlab id: rsm-jcepela
+* Group number: 10
+* Group name: The Nameless
+* Team member names: Zhengyu Jiang, Xi Jiang, Qiuyi Lu, Jake Cepela
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## load radiant packages if neededi
+if (!exists("r_environment")) library(radiant)
+library(tidyverse)
+library(ggplot2)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document by answering the questions in `s-mobile.pdf` on Canvas (week9/). The code block below will load the data you will need. Please DO NOT change the code used to load the data. Create an HTML file with all your results and comments and push both the Rmarkdown and HTML file to GitLab when you are done. All analysis results MUST be reproducible (i.e., the TA and I must be able to recreate the HTML from the Rmarkdown file without changes or errors). Upload all files to GitLab.
+
+This is the fourth group assignment for MGTA 455 and you will be using git and GitLab. If two people edit the same file at the same time you could get what is called a "merge conflict". git will not decide for you who's change to accept so the team-lead will have to determine which edits to use. To avoid merge conflicts, always "pull" changes to the repo before you start working on any files. Then, when you are done, save and commit your changes, and then push them to GitLab. Make "pull first" a habit!
+
+```{r}
+## Loading and split the data from Dropbox
+s_mobile <- readr::read_rds("data/s_mobile.rds") %>% mutate(cweight = ifelse(churn == "yes", 1L, 49L))
+train <- filter(s_mobile, training == 1)
+test <- filter(s_mobile, training == 0)
+representative <- filter(s_mobile, representative == 1)
+```
+
+
+```{r}
+# Show descriptive statistics in the training data
+result <- explore(
+  train, 
+  vars = c(
+    "churn", "changer", "changem", "revenue", "mou", "overage", "roam", "conference", "months", "uniqsubs",
+    "custcare", "retcalls", "dropvce", "eqpdays", "refurb", "smartphone", "highcreditr", "mcycle", "car",
+    "travel", "region", "occupation"
+  ), 
+  fun = c("mean", "sd", "min", "max"),
+  nr = Inf
+)
+summary(result)
+# dtab(result)
+stats <- result$tab
+```
+
+```{r}
+# Show churn in the representative sample
+result <- explore(
+  representative, 
+  vars = "churn", 
+  fun = "mean",
+  nr = Inf
+)
+summary(result)
+# dtab(result)
+```
+
+## Question answers
+
+### Logistic Model
+
+```{r}
+result_27k <- logistic(
+  train, 
+  rvar = "churn", 
+  evar = c(
+    "changer", "changem","revenue", "mou", "overage", "roam", 
+    "months", "uniqsubs", "custcare", "retcalls", "dropvce", 
+    "eqpdays", "refurb", "smartphone", "highcreditr", "mcycle", 
+    "travel", "region", "occupation"
+  ), 
+  lev = "yes", 
+  wts = "cweight", 
+  check = "standardize"
+)
+
+pred <- predict(result_27k, pred_data = s_mobile)
+s_mobile <- store(s_mobile, pred, name = "p_base")
+pred <- predict(result_27k, pred_data = test)
+test <- store(test, pred, name = "pred_logit")
+auc(test$pred_logit, test$churn == 'yes')
+
+write.coeff(result_27k,sort=T)
+plot(result_27k, custom = FALSE)
+```
+
+### Tune the parameters of NN model
+
+```{r eval=FALSE, include=FALSE}
+for (s in seq(1, 10, 1)){
+   for (d in seq(0.1, 1, 0.3)){
+     result <- nn(
+       train, 
+       rvar = "churn", 
+       evar = c(
+         "changer", "changem", "revenue", "mou", "overage", "roam", 
+         "conference", "months", "uniqsubs", "custcare", "retcalls", 
+         "dropvce", "eqpdays", "refurb", "smartphone", "highcreditr", 
+         "mcycle", "car", "travel", "region", "occupation"
+       ), 
+       lev = "yes", 
+       size = s, 
+       decay = d, 
+       wts = "cweight", 
+       seed = 1234
+     )
+     pred <- predict(result, pred_data = test)
+     test <- store(test, pred, name = "pred_logit")
+     m <- auc(test$pred_logit, test$churn == 'yes')
+     print(c(s, d, m))
+   }
+ }
+```
+
+### Best NN model
+
+```{r fig.width = 7, fig.height = 8.4, dpi = 96}
+result_main <- nn(
+  train, 
+  rvar = "churn", 
+  evar = c(
+    "changer", "changem", "revenue", "mou", "overage", "roam", 
+    "conference", "months", "uniqsubs", "custcare", "retcalls", 
+    "dropvce", "eqpdays", "refurb", "smartphone", "highcreditr", 
+    "mcycle", "car", "travel", "region", "occupation"
+  ), 
+  lev = "yes", 
+  size = 9, 
+  decay = 0.1,
+  wts = "cweight", 
+  seed = 1234
+)
+# summary(result, prn = TRUE)
+plot(result_main, plots = "garson", custom = FALSE)
+plot(result_main, plots = "olden", custom = FALSE)
+pred <- predict(result_main, pred_data = test)
+test <- store(test, pred, name = "pred_logit")
+auc(test$pred_logit, test$churn == 'yes')
+
+pred <- predict(result_main, pred_data = representative)
+representative <- store(representative, pred, name = "p_base")
+```
+
+## Calculate the churn rate for two actions
+
+```{r}
+# action 1: provide new plans to reduce the overage
+pred <- predict(result_main, pred_data = representative, pred_cmd = "overage = 0")
+representative <- store(representative, pred, name = "p_overage0")
+
+result <- explore(
+  representative, 
+  vars = c("churn", "p_overage0"), 
+  fun = c("n_obs", "mean"),
+  data_filter = "overage > 0", 
+  nr = Inf
+)
+summary(result)
+
+# action 2: seduce customers to get a new cell phone with a discount of $80
+pred <- predict(result_main, pred_data = representative, pred_cmd = "eqpdays = 0")
+representative <- store(representative, pred, name = "p_eqpdays0")
+
+result <- explore(
+  representative, 
+  vars = c("churn", "p_eqpdays0"), 
+  fun = c("n_obs", "mean"),
+  data_filter = "eqpdays > 600", 
+  nr = Inf
+)
+summary(result)
+```
+
+
+```{r}
+# define a fuction to calculate CLVs and difference
+CLV_diff <- function(monthly_revenue, churn_base, churn_new) {
+  nr_years <- 5
+  churns <- rep(churn_base, nr_years * 12)
+  monthly_discount_rate <- 0.008
+  retention_nap <- c(1, cumprod(1 - churns))[1:60]
+  revenues <- rep(monthly_revenue, nr_years)
+  time <- 0:((nr_years * 12) - 1)
+  exp_profit <- retention_nap * revenues * 0.4
+  PV_exp_profit <- exp_profit / (1 + monthly_discount_rate)^time
+  CLV_base <- cumsum(PV_exp_profit)[60]
+  
+  nr_years <- 5
+  churns <- rep(churn_new, nr_years * 12)
+  monthly_discount_rate <- 0.008
+  retention_nap <- c(1, cumprod(1 - churns))[1:60]
+  revenues <- rep(monthly_revenue, nr_years)
+  time <- 0:((nr_years * 12) - 1)
+  exp_profit <- retention_nap * revenues * 0.4
+  PV_exp_profit <- exp_profit / (1 + monthly_discount_rate)^time
+  CLV_new <- cumsum(PV_exp_profit)[60]
+  
+  p <- CLV_new - CLV_base
+  return(c(CLV_base, CLV_new, p))
+}
+```
+
+### Evaluation of economics(for 1M customers)
+
+```{r}
+# action 1: 100% acception
+t <- representative %>% filter(overage > 0)
+
+clv_diff <- CLV_diff(mean(t$revenue), 0.024, 0.014)
+
+perc <- length(t$churn)/30000
+profit_change <- 1000000 * perc * clv_diff[3]
+
+
+clv_overage=data.frame(orginal_clv=clv_diff[1],new_clv=clv_diff[2],diff_clv=clv_diff[3],scaled_profit=profit_change)
+
+# action 2: 50% acception with $80 discount
+t <- representative %>% filter(eqpdays > 600)
+
+clv_diff <- CLV_diff(mean(t$revenue), 0.025, 0.014)
+
+marg <- clv_diff - 80
+perc <- 0.5 * length(t$churn)/30000
+profit_change <- 1000000 * perc * clv_diff[3]
+
+
+clv_eqpdays=data.frame(orginal_clv=clv_diff[1],new_clv=clv_diff[2],diff_clv=clv_diff[3],scaled_profit=profit_change)
+
+clv_profit=rbind(clv_eqpdays,clv_overage)%>% mutate(actioin=c("decrease eqpdays","decrease overage"))
+clv_profit
+
+```
+

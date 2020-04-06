@@ -1,0 +1,163 @@
+---
+title: "Intuit Quickbooks Upgrade: Redux"
+output: html_document
+---
+
+* Team-lead GitLab id:
+* Group name:
+* Team member names:
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 144,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## load radiant packages if needed
+if (!exists("r_environment")) library(radiant)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document with your group by answering the questions in `intuit-redux.pdf` on Canvas (week7/). Create an HTML file with all your results and comments and push both the Rmarkdown and HTML file to GitLab when your team is done. All results MUST be reproducible (i.e., the TA and I must be able to recreate the HTML from the Rmarkdown file without changes or errors). This means that you should NOT use any R-packages that are not part of the rsm-msba-spark docker container.
+
+This is the second group assignment for MGTA 455 and you will be using git and GitLab. If two people edit the same file at the same time you could get what is called a "merge conflict". git will not decide for you who's change to accept so the team-lead will have to determine which edits to use. To avoid merge conflicts, **always** click "pull" in Rstudio before you start working on any files. Then, when you are done, save and commit your changes, and then push them to GitLab. Make "pull-first" a habit!
+
+If multiple people are going to work on the assignment at the same time I recommend you work on different files. You can use `source` to include R-code in your Rmarkdown document or include other R(markdown) documents into the main assignment file. 
+
+Group work-flow tips as discussed during ICT in Summer II are shown below:
+
+* Pull, edit, save, stage, commit, and push
+* Schedule who does what and when
+* Try to avoid working simultaneously on the same file 
+* If you are going to work simultaneously, do it in different files, e.g., 
+    - assignment1_john.R, assignment1_susan.R, assignment1_wei.R 
+    - assignment_1a.R, assignment_1b.R, assignment_1c.R
+* Use the `source` command to bring different pieces of code together into an Rmarkdown document or into an R-code file
+* Alternatively, use _child_ in Rmarkdown to include a part of a report
+* For (very) big projects use 'branches' to avoid conflicts (and stay on your branch)
+
+A graphical depiction of the group work-flow is shown below:
+
+![](images/git-group-workflow.png)
+
+Tutorial videos about using Git, GitLab, and GitGadget for group assignments:
+
+* Setup the MSBA server to use Git and GitLab: https://youtu.be/oUrI7G3NHDg
+* Dealing with Merge Conflicts: https://youtu.be/elq5UUG0RbE
+* Group assignment practice: https://youtu.be/uwqUHl3z37o
+
+Additional resources on git are linked below:
+
+* http://happygitwithr.com
+* http://r-pkgs.had.co.nz/git.html
+* http://stackoverflow.com/questions/tagged/git or just a google search
+* https://try.github.io
+* https://www.manning.com/books/git-in-practice
+* https://github.com/GitInPractice/GitInPractice#readme
+
+
+```{r}
+## loading the data (do NOT change the data)
+intuit75k <- readr::read_rds("data/intuit75k.rds")
+intuit75k_new=intuit75k%>% mutate(zip801=ifelse(zip=="00801",TRUE,FALSE),zip804=ifelse(zip=="00804",TRUE,FALSE),label=ifelse(res1=='Yes',1,0)) 
+intuit75k_train=intuit75k_new%>% filter(training==1)
+intuit75k_test=intuit75k_new%>% filter(training==0)
+
+write.csv(intuit75k_new,'intuit75k_new.csv')
+
+margin=60
+cost=1.41
+cut_off=cost/margin
+
+```
+
+
+
+nn:
+```{r}
+rvar="res1"
+evar=c("zip_bins","numords","version1","last","dollars","owntaxprod","upgraded","zip801","zip804")
+lev="Yes"
+```
+
+
+```{r eval=FALSE, include=FALSE}
+cv.nn(result,size=1:5,decay=seq(0,0.5,0.1),fun=auc)
+```
+
+![result of cross validation of NN](deep learning result.png)
+
+```{r}
+#using the  model  that generates the highest auc :
+result <- nn(intuit75k_train, rvar = rvar, evar = evar, lev = lev, size = 3, decay = 0.4, seed = 1234)
+
+intuit75k_test$click_logit <- predict(result,intuit75k_test)$Prediction
+test_data=intuit75k_test%>%
+  mutate(pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+
+#scaled profit
+total=763334
+test_data=test_data%>% mutate(pred_click_total=ifelse(click_logit/2<cut_off,0,1))
+pred_true=sum(test_data$pred_click_total)
+pred_true_rate=pred_true/nrow(test_data)
+tp=test_data %>%filter (pred_click_total==1,label==1)
+
+
+send_number=total*pred_true_rate
+adj_response_rate=nrow(tp)/pred_true/2
+exp_buyers=adj_response_rate*send_number
+totalcost=send_number*cost
+exp_profit=exp_buyers*margin-totalcost
+exp_profit
+
+#expected profit on the test set of res2
+send_number=nrow(test_data)*pred_true_rate
+adj_response_rate=nrow(tp)/pred_true/2
+exp_buyers=adj_response_rate*send_number
+totalcost=send_number*cost
+exp_profit_test=exp_buyers*margin-totalcost
+exp_profit_test
+
+###
+
+```

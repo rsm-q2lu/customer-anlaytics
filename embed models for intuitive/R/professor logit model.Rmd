@@ -1,0 +1,137 @@
+---
+title: "prof"
+author: "aki"
+date: "2/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+calculate_prof_ROME=function(dataf,colname,coltext){
+  
+TP=dataf %>%filter (pred_click==TRUE,label==1)
+pred_true=sum(dataf$pred_click)
+revenue=nrow(TP)*margin
+totalcost=cost*sum(pred_true)
+exp_profit=revenue-totalcost
+exp_ROME=exp_profit/totalcost
+
+result=data.frame(expected_profit=exp_profit,expected_ROME=round(exp_ROME,2),auc=ModelMetrics::auc(dataf$label,dataf$click_logit),model=coltext)
+
+return(result)
+}
+
+```
+
+
+```{r}
+
+intuit75k <- readr::read_rds("../data/intuit75k.rds") 
+intuit75k_new=intuit75k%>% mutate(zip801=ifelse(zip=="00801",TRUE,FALSE),zip804=ifelse(zip=="00804",TRUE,FALSE),label=ifelse(res1=='Yes',1,0)) 
+
+write.csv(intuit75k_new,'intuit75k_new.csv')
+
+ intuit75k_train=intuit75k_new%>% filter(training==1)
+intuit75k_test=intuit75k_new%>% filter(training==0)
+ res1list=intuit75k_test %>% filter(res1=='Yes') %>% select(id)
+ model = label ~ zip_bins+ numords+version1+numords*version1+  last+last*version1+dollars+owntaxprod+version1+upgraded+zip801+zip804
+ 
+glm.fits=glm(formula=model,data=intuit75k_train,family=binomial)
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+
+
+margin=60
+cost=1.41
+cut_off=cost/margin
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+professor_model_profit=calculate_prof_ROME(test_data,pred_click,"professor_model_profit")
+professor_model_profit
+```
+
+nn:
+```{r}
+rvar="res1"
+evar=c("zip_bins","numords","version1","last","dollars","owntaxprod","upgraded","zip801","zip804")
+lev="Yes"
+
+result <- nn(intuit75k_train, rvar = rvar, evar = evar, lev = lev, size = 3, decay = 0.4, seed = 1234)
+
+intuit75k_test$click_logit <- predict(result,intuit75k_test)$Prediction
+test_data=intuit75k_test%>%
+  mutate(pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+nn3_model_profit=calculate_prof_ROME(test_data,pred_click,"nn3_model_profit")
+nn3_model_profit
+
+#scaled profit
+total=763334
+test_data=test_data%>% mutate(pred_click_total=ifelse(click_logit/2<cut_off,0,1))
+pred_true=sum(test_data$pred_click_total)
+pred_true_rate=pred_true/nrow(test_data)
+tp=test_data %>%filter (pred_click_total==1,label==1)
+
+
+send_number=total*pred_true_rate
+adj_response_rate=nrow(tp)/pred_true/2
+exp_buyers=adj_response_rate*send_number
+totalcost=send_number*cost
+exp_profit=exp_buyers*margin-totalcost
+exp_profit
+
+#expected profit on the test set of res2
+send_number=nrow(test_data)*pred_true_rate
+adj_response_rate=nrow(tp)/pred_true/2
+exp_buyers=adj_response_rate*send_number
+totalcost=send_number*cost
+exp_profit_test=exp_buyers*margin-totalcost
+exp_profit_test
+
+###
+
+
+
+result <- nn(intuit75k_train, rvar = rvar, evar = evar, lev = lev, size = 2, decay = 0.4, seed = 1234)
+
+intuit75k_test$click_logit <- predict(result,intuit75k_test)$Prediction
+test_data=intuit75k_test%>%
+  mutate(pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+nn2_model_profit=calculate_prof_ROME(test_data,pred_click,"nn2_model_profit")
+nn2_model_profit
+
+
+
+
+result <- nn(intuit75k_train, rvar = rvar, evar = evar, lev = lev, size = 4, decay = 0.2, seed = 1234)
+
+intuit75k_test$click_logit <- predict(result,intuit75k_test)$Prediction
+test_data=intuit75k_test%>%
+  mutate(pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+nn4_model_profit=calculate_prof_ROME(test_data,pred_click,"nn4_model_profit")
+nn4_model_profit
+
+
+result <- nn(intuit75k_train, rvar = rvar, evar = evar, lev = lev, size = 5, decay = 0.2, seed = 1234)
+
+intuit75k_test$click_logit <- predict(result,intuit75k_test)$Prediction
+test_data=intuit75k_test%>%
+  mutate(pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+nn5_model_profit=calculate_prof_ROME(test_data,pred_click,"nn5_model_profit")
+nn5_model_profit
+
+```
+
+```{r}
+cv.nn(result,size=1:5,decay=seq(0,0.5,0.1),fun=auc)
+```
+
+![result of cross validation of NN](../data/deep learning result.png)

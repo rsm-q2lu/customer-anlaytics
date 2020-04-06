@@ -1,0 +1,56 @@
+Our answer to question 1 is ...
+
+#### 7 rfm models?, train by train data. use test data to evaluate the profit and rome
+##### RFM sequential, RFM iq, RFM per sequential, iq lb, sq lb.
+
+```{r} 
+
+recency=intuit75k$recency
+frequency=intuit75k$frequency
+monetary=intuit75k$monetary
+
+#RFM iq with upper bound 5 bins 
+rec_iq=xtile(recency,5)
+fre_iq=xtile(frequency,5,rev = TRUE)
+mon_iq=xtile(monetary,5,rev=TRUE)
+rfm_iq=paste0(rec_iq,fre_iq,mon_iq)
+
+#RFM sequential 
+rec_sq=rec_iq
+tuango_sq <- tuango_new%>% group_by(rec_iq) %>%
+  mutate(fre_sq = xtile(frequency, 10, rev = TRUE)) %>%
+  ungroup()
+
+## calculate sequential monetary quintiles
+ tuango_sq<- tuango_sq%>% group_by(rec_iq, fre_sq) %>%
+  mutate(mon_sq = xtile(monetary, 10, rev = TRUE)) %>%
+  ungroup()
+ 
+rfm_sq=paste0(rec_sq,fre_sq,mon_sq)
+
+# RFM per sequential
+# iq upper bound
+# iq lower bound
+# sq upper bound
+# sq lower bound
+
+intuit75k=intuit75k %>% mutate(rfm_iq=rfm_iq,rfm_sq=rfm_sq)
+
+
+### function
+perf_calc = function (df,target_customers,margin_on_sales,cost_to_push,sms,intro) {
+mailto_prop=sum(df$mailto)/nrow(df)
+mailed_customers=mailto_prop*target_customers
+mailed=df %>% filter(mailto==TRUE)
+expected_response_rate=mean(mailed$buyer=='yes')
+exp_respon_cus=expected_response_rate*mailed_customers
+mailing_cost=mailed_customers*cost_to_push
+profit=exp_respon_cus*margin_on_sales-mailing_cost
+ROME=profit/mailing_cost
+result=data.frame(sms=sms,intro=intro,expected_response_rate=expected_response_rate,exp_respon_cus=exp_respon_cus,mailing_cost=mailing_cost,profit=profit,ROME=ROME)
+return (result)
+}
+```
+
+
+

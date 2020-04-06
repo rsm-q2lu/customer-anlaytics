@@ -1,0 +1,238 @@
+---
+title: "PFG-bank: Data Driven Credit Card Design"
+output: html_document
+---
+
+* Team-lead gitlab id: 
+Jake Cepela
+* Group name: The nameless
+* Team member names: Xi Jiang,Zhengyu Jiang, Qiuyi Lu,
+Jake Cepela
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## load radiant packages if neededi
+if (!exists("r_environment")) library(radiant)
+library(tidyverse)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document by answering the questions in `pfg-bank.pdf` on Canvas (week10/). The code block below will load the historical data from exhibits 1 and 2. Please DO NOT change the code used to load the data. Create an HTML (Notebook) file with all your results and comments and push both the Rmarkdown and HTML file to GitLab when you are done. All analysis results MUST be reproducible (i.e., the TA and I must be able to recreate the HTML from the Rmarkdown file without changes or errors).
+
+This is the final group assignment for MGTA 455 and you will be using git and GitLab. If two people edit the same file at the same time you could get what is called a "merge conflict". git will not decide for you who's change to accept so the team-lead will have to determine which edits to use. To avoid merge conflicts, always "pull" changes to the repo before you start working on any files. Then, when you are done, save and commit your changes, and then push them to GitLab. Make "pull first" a habit!
+
+```{r}
+exhibit1 <- readxl::read_excel("data/exhibits.xlsx", sheet = "exhibit1")
+exhibit2 <- readxl::read_excel("data/exhibits.xlsx", sheet = "exhibit2")
+```
+
+## Question answers
+
+#### Check the impact of the factors on the response rate. We did some math and found that the influence of annual fee is decreased by the increase of the APR even in different groups. 
+
+```{r}
+bk_score_group = exhibit1 %>% group_by(bk_score,apr,fixed_var,annual_fee,visamc) %>% summarize(prop=resp/nr_mailed)
+bk_score_group
+
+```
+
+### Experiment: add interaction between annual_fee and APR, and run the experiment, the best number of trial is 18.
+
+```{r}
+result <- doe(
+  factors = c(
+    "annual_fee;0;20", 
+    "APR;14.9;16.8;19.8", 
+    "fixed_var;Fixed;Variable", 
+    "BK_Score;150;200;250"
+  ), 
+  int = "annual_fee:APR", 
+  seed = 1234
+)
+print(result)
+```
+#### Using the number of 18 trials.
+
+```{r}
+
+result <- doe(
+  factors = c(
+    "annual_fee;0;20", 
+    "APR;14.9;16.8;19.8", 
+    "fixed_var;Fixed;Variable", 
+    "BK_Score;150;200;250"
+  ), 
+  int = "annual_fee:APR", 
+  trials = 18, 
+  seed = 1234
+)
+
+print(result)
+
+```
+
+###
+
+```{r}
+traindata=readxl::read_excel("data/traindata_new.xlsx")
+traindata <- traindata %>% gather(key="respon",value="freq",c(Responses,Non_response)) %>% rename(Annual_Fee=`Annual Fee`)
+logitmodel <- logistic(
+  traindata, 
+  rvar = "respon", 
+  evar = c("apr", "Fixed_variable", "Annual_Fee", "bk_score"), 
+  lev = "Responses", 
+  wts = "freq"
+)
+train_pred=predict(logitmodel,pred_data=traindata)
+```
+
+Then we submit and get the 1st round data(train_new.csv). We combine the data with the historical data. 
+The approach is that we filter the data from the historical data that is not shown up in the train_new.csv.
+Because the historical data is much larger than the train data, we calculate the response rate and take 4000 of Sent of each product in the historical data. 
+The combinded data is totaldata.rds
+
+
+
+### Combind data to train model:
+
+```{r}
+index_selected=c(1,2,3,5,9,10,11,14)
+exhibit1=exhibit1 %>% mutate(index=seq(1,nrow(exhibit1)))
+historical=exhibit1 %>%filter(index %in% index_selected)
+historical_data=historical %>% mutate(Sent=4000,response_rate=resp/nr_mailed, Responses=round(Sent*response_rate),Non_response=round(Sent-Responses)) %>% gather(key="respon",value="freq",c(Responses,Non_response))
+
+
+historical_data=historical_data %>% rename(Fixed_variable =fixed_var,Annual_Fee=annual_fee) %>% select(colnames(traindata))
+totaldata=rbind(historical_data,traindata)
+
+saveRDS(totaldata,"totaldata.rds")
+
+## Create data from a table
+totaldata_dat <- select(totaldata, apr, Fixed_variable, Annual_Fee, Sent, bk_score, respon, freq) %>%  table2data("freq")
+## register the new dataset
+register("totaldata_dat", "totaldata")
+
+```
+
+
+### Model Selection:
+
+
+#### Logistic Regression model:
+
+```{r}
+result <- logistic(
+  totaldata_dat, 
+  rvar = "respon", 
+  evar = c("apr", "Fixed_variable", "Annual_Fee", "bk_score"), 
+  lev = "Responses", 
+  int = c(
+    "apr:Fixed_variable", 
+    "apr:Annual_Fee", "apr:bk_score", 
+    "Fixed_variable:Annual_Fee", 
+    "Fixed_variable:bk_score", 
+    "Annual_Fee:bk_score"
+  )
+)
+
+train_pred=predict(result,pred_data=totaldata_dat)
+
+traindata_pred=totaldata_dat %>% mutate(probability=train_pred$Prediction)
+
+auc(train_pred$Prediction, totaldata_dat$respon == 'Responses')
+
+```
+
+
+#### XGBoost model:
+
+```{r}
+xgb <- gbt(
+  totaldata_dat, 
+  rvar = "respon", 
+  evar = c("apr", "Fixed_variable", "Annual_Fee", "bk_score"), 
+  lev = "Responses", 
+  max_depth = 4, 
+  learning_rate = 0.5, 
+  min_child_weight = 4, 
+  early_stopping_rounds = 3, 
+  seed = 1234
+)
+
+train_pred=predict(xgb,pred_data=totaldata_dat)
+
+auc(train_pred$Prediction, totaldata_dat$respon == 'Responses')
+
+```
+
+#### XGBoost model has a higher AUC. 
+
+#### Using XGBoost model to predict probability:
+
+```{r}
+exhibit2=exhibit2 %>% rename(Fixed_variable =fixed_var,Annual_Fee=annual_fee) %>% mutate(bk_score=150)
+
+prob=predict(xgb,pred_data=exhibit2)$Prediction
+
+
+pred_prob150=predict(xgb,pred_data=exhibit2,pred_cmd="bk_score=150")
+pred_prob150$Prediction
+pred_prob200=predict(xgb,pred_data=exhibit2,pred_cmd="bk_score=200")
+pred_prob250=predict(xgb,pred_data=exhibit2,pred_cmd="bk_score=250")
+
+```
+
+### Multiply probability with CLV and calculate the profit for each BK_score and each product:
+
+```{r}
+exhibit2_1 =exhibit2 %>% mutate(pred_prob150=pred_prob150$Prediction,pred_prob200=pred_prob200$Prediction,pred_prob250=pred_prob250$Prediction,profit150=pred_prob150*clv150,profit200=pred_prob200*clv200,profit250=pred_prob250*clv250) 
+
+```
+
+For BK_150, the highest pred_prob150 is the offer 11.
+For BK_200, the highest pred_prob150 is the offer 7.
+For BK_250, the highest pred_prob150 is the offer 11.
+

@@ -1,0 +1,231 @@
+
+```{r}
+##load data
+intuit75k_total =read_csv("../intuit75k_withstate.csv")  #we created a new state column by matching the zip code with 50 states of the united states. See python jupyter notebook how we match the zip code with state.
+
+saveRDS(intuit75k_total,"intuit75k_total.rds")
+
+intuit75k=readRDS("intuit75k_total.rds")
+intuit75k=intuit75k %>% mutate(label=ifelse(res1=='Yes',1,0)) 
+margin=60
+cost=1.41
+breakeven_response=1.41/60
+average_response_rate=sum(intuit75k$label)/nrow(intuit75k)
+intuit75k_train=intuit75k%>% filter(training==1)
+intuit75k_test=intuit75k%>% filter(training==0)
+
+```
+
+
+#### define a profit,ROME function
+
+```{r}
+
+calculate_prof_ROME=function(dataf,colname,coltext){
+  
+TP=dataf %>%filter (pred_click==TRUE,label==1)
+pred_true=sum(dataf$pred_click)
+revenue=nrow(TP)*margin
+totalcost=cost*sum(pred_true)
+exp_profit=revenue-totalcost
+exp_ROME=exp_profit/totalcost
+
+result=data.frame(expected_profit=exp_profit,expected_ROME=round(exp_ROME,2),auc=ModelMetrics::auc(dataf$label,dataf$click_logit),model=coltext)
+
+return(result)
+}
+
+
+```
+
+#### logistic regression models
+
+```{r}
+
+## basic lg probability
+cut_off=1.41/60
+
+#using 50 states and standardize numeric variables:
+
+f1 = label ~ zip_state+sex+ bizflag+ std_numords+std_last+std_dollars+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f1,data=intuit75k_train,family=binomial)
+#summary(glm.fits)
+
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+logit_basic=calculate_prof_ROME(test_data,pred_click,"logit_basic")
+```
+
+
+
+```{r}
+
+#using bins:
+
+f2 = label ~ zip_bins+sex+ bizflag+ std_numords+std_last+std_dollars+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f2,data=intuit75k_train,family=binomial)
+
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+click_logit2=click_logit
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit2,pred_click=ifelse(click_logit2 > cut_off,TRUE,FALSE))
+
+logit_using_bins=calculate_prof_ROME(test_data,pred_click,"logit_using_bins")
+
+```
+
+```{r}
+#using log dollar:
+
+par(mar=c(1,1,1,1))
+hist(intuit75k_train$dollars) ##right skewed,using log to turn it into normally distributed. 
+hist(intuit75k_train$log_dollars)
+
+f3 = label ~ zip_state+sex+ bizflag+ std_numords+std_last+standardize(log_dollars)+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f3,data=intuit75k_train,family=binomial)
+
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+
+logit_logdollar=calculate_prof_ROME(test_data,pred_click,"logit_logdollar") # result of standardize(log(dollar)) is not better than the standardized(dollar)
+
+```
+
+
+```{r}
+
+#using interactions of variables:
+
+f_interaction = label ~ zip_state+sex+ zip_state*sex+bizflag+ std_numords+std_last+standardize(log_dollars)+std_sincepurch+owntaxprod+version1+upgraded
+
+glm.fits=glm(formula=f_interaction,data=intuit75k_train,family=binomial)
+
+click_logit=predict(glm.fits, newdata = intuit75k_test, type = "response")
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit,pred_click=ifelse(click_logit > cut_off,TRUE,FALSE))
+
+
+logit_interaction=calculate_prof_ROME(test_data,pred_click,"logit_interaction") 
+```
+
+
+```{r}
+set.seed(1234) 
+# Dumy code categorical predictor variables
+x <- model.matrix(f1, intuit75k_train)[,-1]
+# Convert the outcome (class) to a numerical variable
+y <- intuit75k_train$label
+
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+
+#coef(cv.lasso, cv.lasso$lambda.min)
+#coef(cv.lasso, cv.lasso$lambda.1se)
+
+```
+
+
+```{r}
+#using lasso
+
+model <- glmnet(x, y, alpha = 1, family = "binomial",
+                lambda = cv.lasso$lambda.min)
+
+# Make predictions on the test data
+x.test <- model.matrix(f1, intuit75k_test)[,-1]
+probabilities <- model %>% predict(newx = x.test,type="response") 
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=probabilities,pred_click=ifelse(probabilities> cut_off,TRUE,FALSE))
+
+logit_base_lasso_min=calculate_prof_ROME(test_data,pred_click,"logit_base_lasso_min") 
+
+
+
+#lambda.1se
+model_1se <- glmnet(x, y, alpha = 1, family = "binomial",
+                lambda = cv.lasso$lambda.1se)
+
+# Make predictions on the test data
+x.test <- model.matrix(f1, intuit75k_test)[,-1]
+probabilities <- model_1se %>% predict(newx = x.test,type="response") 
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=probabilities,pred_click=ifelse(probabilities> cut_off,TRUE,FALSE))
+
+logit_base_lasso1se=calculate_prof_ROME(test_data,pred_click,"logit_base_lasso1se") 
+```
+
+
+```{r}
+
+## You should do this with logistic regression as well and compare the results to the lower bound estimates you get directly from radiant.model::logistic or pyrsm.predict_conf_int
+
+result_conf= radiant.model::logistic(intuit75k_train,rvar='res1',evar=c('zip_state','sex', 'bizflag','std_numords','std_last','std_dollars','std_sincepurch','owntaxprod','version1','upgraded'),lev='Yes')
+
+conf_logit=predict(result_conf, pred_data = intuit75k_test, conf_lev = 0.9, se = TRUE)
+
+intuit75k_test=intuit75k_test%>% mutate(click_logit_lb=conf_logit$`5%`,click_logit_ub=conf_logit$`95%`)
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit_lb,pred_click=ifelse(click_logit_lb> cut_off,TRUE,FALSE))
+
+logit_base_lb=calculate_prof_ROME(test_data,pred_click,"logit_base_lb") 
+
+
+test_data=intuit75k_test%>%
+  mutate(click_logit=click_logit_ub,pred_click=ifelse(click_logit_ub> cut_off,TRUE,FALSE))
+
+logit_base_ub=calculate_prof_ROME(test_data,pred_click,"logit_base_ub") 
+
+
+```
+
+
+Because it took too long time to run bootstrap. We didn't run it when we knit. Please see the code in the RMD file. 
+
+```{r eval=FALSE, include=FALSE}
+intuit75k=readRDS("intuit75k_total.rds")
+
+intuit75k_train=intuit75k %>%filter(training==1)
+intuit75k_test=intuit75k %>%filter(training==0)%>%mutate(std_numords=standardize(numords),std_last=standardize(last),std_dollars=standardize(dollars),std_sincepurch=standardize(sincepurch)) %>% mutate(label=ifelse(res1=='Yes',1,0)) 
+
+total_nn_100_logistic=data.frame(id=intuit75k_test$id)
+set.seed(1234)
+for (i in 1:100){
+  table=sample_n(intuit75k_train,nrow(intuit75k_train),replace=T) %>% mutate(std_numords=standardize(numords),std_last=standardize(last),std_dollars=standardize(dollars),std_sincepurch=standardize(sincepurch),label=ifelse(res1=='Yes',1,0))
+  f1 = label ~ zip_state+sex+ bizflag+ std_numords+std_last+std_dollars+std_sincepurch+owntaxprod+version1+upgraded
+  glm.fits=glm(formula=f1,data=table,family=binomial)
+  pred=predict(glm.fits, newdata = intuit75k_test,type = "response")
+  total_nn_100_logistic[paste("pred",i)]=pred
+}
+
+total_nn_100_logistic_sd= total_nn_100_logistic %>% select(-id) 
+temp=as.matrix(total_nn_100_logistic_sd) 
+fifth=rowQuantiles(temp,probs = 0.05)
+lb_sd=rowSums(temp)/100-1.64*rowSds(temp)
+
+total_nn_100_logistic_sd= total_nn_100_logistic_sd %>% mutate(fifth_percent=fifth,lb_sd=lb_sd)
+total_nn_100_logistic_sd=cbind(id=intuit75k_test$id,total_nn_100_logistic_sd) #5% percentile
+
+
+```
+
+#### discuss predictive performance for each model : real profit,rome
+
+```{r}
+compare_lg= rbind(logit_basic,logit_base_lasso_min,logit_base_lasso1se,logit_base_lb,logit_base_ub,logit_logdollar,logit_interaction) %>% arrange(desc(expected_profit))
+compare_lg
+```
+
+##### logit_basic is the best model in profit.
