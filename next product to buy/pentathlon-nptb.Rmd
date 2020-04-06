@@ -1,0 +1,432 @@
+---
+title: "Pentathlon III: Next Product to Buy Modeling"
+output: html_document
+---
+
+* Team-lead gitlab id:rsm-jcepela
+* Team-lead gitlab username:Jake Cepela 
+* Group number:
+* Group name:the nameless
+* Team member names:Qiuyi Lu, Xi Jiang, Zhengyu Jiang, Jake Cepela
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## load radiant packages if neededi
+if (!exists("r_environment")) library(radiant)
+library(tidyverse)
+library(glmnet)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document by answering the questions in `pentathlon-nptb.pdf` on Canvas (week8/). Create an Rmarkdown file with all your results and comments and push both the Rmarkdown and HTML file to GitLab when your team is done. All results MUST be reproducible (i.e., the TA and I must be able to recreate the HTML from the Jupyter Notebook file without changes or errors). This means that you should NOT use any python-packages that are not part of the rsm-msba-spark docker container.
+
+This is the third group assignment for MGTA 455 and you will be using git and GitLab. If two people edit the same file at the same time you could get what is called a "merge conflict". git will not decide for you who's change to accept so the team-lead will have to determine which edits to use. To avoid merge conflicts, always "pull" changes to the repo before you start working on any files. Then, when you are done, save and commit your changes, and then push them to GitLab. Make "pull first" a habit!
+
+```{r}
+## loading the data - this dataset must NOT be changed
+pentathlon_nptb <- readr::read_rds("data/pentathlon_nptb.rds")
+# pentathlon_nptb <- readr::read_rds("data/pentathlon_nptb_5M.rds")
+```
+
+###  1. For each customer determine the message (i.e., endurance, strength, water, team, backcountry, winter, or racquet) predicted to lead to the highest probability of purchase. Describe your approach. 
+
+#### Train a model to predict probability
+##### EDA :Inspect Demographic features, check the difference of proportion of buyers in each category.
+
+```{r}
+pentathlon_nptb_realdata=pentathlon_nptb %>% filter(representative == 1)
+
+# age: relatively obvious
+age=pentathlon_nptb_realdata %>% group_by(age) %>% summarize(num_buyer=sum(buyer=='yes'),people=n(),prop_buyer=num_buyer/people) %>% arrange(desc(prop_buyer))
+
+# gender: no large difference
+gender=pentathlon_nptb_realdata %>% group_by(gender) %>% summarize(num_buyer=sum(buyer=='yes'),people=n(),prop_buyer=num_buyer/people) %>% arrange(desc(prop_buyer))
+
+
+## cut into bins
+
+pentathlon_nptb_bins=pentathlon_nptb_realdata %>% mutate(income_bins=xtile(income,10),education_bins=xtile(education,10),child_bins=xtile(children,10)) 
+
+income=pentathlon_nptb_bins%>% group_by(income_bins) %>% summarize(num_buyer=sum(buyer=='yes'),people=n(),prop_buyer=num_buyer/people) %>% arrange(desc(prop_buyer))
+
+# children: no large difference
+children=pentathlon_nptb_bins%>% group_by(child_bins) %>% summarize(num_buyer=sum(buyer=='yes'),people=n(),prop_buyer=num_buyer/people) %>% arrange(desc(prop_buyer))
+
+# education: obvious
+education=pentathlon_nptb_bins%>% group_by(education_bins) %>% summarize(num_buyer=sum(buyer=='yes'),people=n(),prop_buyer=num_buyer/people) %>% arrange(desc(prop_buyer))
+
+
+pentathlon_nptb %>%
+  ggplot(aes(x=age,fill=buyer)) + geom_bar(position='fill') + xlab('age')
+
+pentathlon_nptb %>%
+  ggplot(aes(x=gender,fill=buyer)) + geom_bar(position='fill') + xlab('gender')
+
+education %>%
+  ggplot(aes(x=factor(education_bins),y=prop_buyer,group=1)) + geom_line() + xlab('education_bins')
+
+
+children %>%
+  ggplot(aes(x=factor(child_bins),y=prop_buyer,group=1)) + geom_line() + xlab('children_bins')
+
+income %>%
+  ggplot(aes(x=factor(income_bins),y=prop_buyer,group=1)) + geom_line() + xlab('income_bins')
+```
+
+
+
+
+## Model1: lr model:
+
+### basic:
+
+```{r}
+pentathlon_nptb=pentathlon_nptb %>% mutate(label= buyer=="yes")
+
+traindata= pentathlon_nptb %>% filter(training == 1) %>% mutate(cweight = ifelse(buyer == 'yes', 1L, 99L))
+testdata= pentathlon_nptb %>% filter(training != 1)
+
+rvar="buyer"
+evar=c("age","gender","education","income","children","message","freq_endurance","freq_strength","freq_water","freq_team","freq_backcountry", "freq_winter", "freq_racquet")
+lev='yes'
+
+f1 = radiant.model::logistic(traindata,rvar=rvar,evar=evar,lev=lev,wts=traindata$cweight)
+res1=predict(f1, pred_data = testdata)
+
+```
+
+
+###  cut income, education, children into bins:
+
+```{r}
+traindata2=traindata%>% mutate(income_bins=xtile(income,10),education_bins=xtile(education,10),child_bins=xtile(children,10)) %>% mutate(cweight = ifelse(buyer == 'yes', 1L, 99L))
+
+testdata2=testdata%>% mutate(income_bins=xtile(income,10),education_bins=xtile(education,10),child_bins=xtile(children,10)) 
+
+rvar="buyer"
+evar2=c("age","gender","education_bins","income_bins","child_bins","message","freq_endurance","freq_strength","freq_water","freq_team","freq_backcountry", "freq_winter", "freq_racquet")
+
+lev='yes'
+f2 = radiant.model::logistic(traindata2,rvar=rvar,evar=evar2,lev=lev,wts=traindata2$cweight)
+res2=predict(f2, pred_data = testdata2)
+
+```
+
+
+### interaction:
+```{r}
+
+traindata3=traindata2
+
+testdata3=testdata2
+  
+rvar="buyer"
+evar3=c("age","gender","education_bins","income_bins","child_bins","message","freq_endurance","freq_strength","freq_water","freq_team","freq_backcountry", "freq_winter", "freq_racquet")
+
+int=c("message:freq_endurance","message:freq_strength","message:freq_water","message:freq_team","message:freq_backcountry", "message:freq_winter", "message:freq_racquet","age:gender")
+
+lev='yes'
+
+f3 = radiant.model::logistic(traindata3,rvar=rvar,evar=evar3,int=int,wts=traindata3$cweight)
+res3=predict(f3, pred_data = testdata3)
+```
+
+```{r}
+traindata4=traindata3 %>% mutate(education_10=ifelse(education_bins==10,1,0),income_10=ifelse(income_bins==10,1,0))
+
+testdata4=testdata3 %>% mutate(education_10=ifelse(education_bins==10,1,0),income_10=ifelse(income_bins==10,1,0))
+
+  
+rvar="buyer"
+evar4=c("age","gender","education_bins","income_bins","child_bins","message","freq_endurance","freq_strength","freq_water","freq_team","freq_backcountry", "freq_winter", "freq_racquet","education_10","income_10")
+
+int=c("message:freq_endurance","message:freq_strength","message:freq_water","message:freq_team","message:freq_backcountry", "message:freq_winter", "message:freq_racquet")
+
+lev='yes'
+
+f4 = radiant.model::logistic(traindata4,rvar=rvar,evar=evar4,int=int,wts=traindata4$cweight)
+res4=predict(f4, pred_data = testdata4)
+
+```
+
+###  evaluate model by auc
+```{r}
+auc1=ModelMetrics::auc(testdata$label,res1$Prediction)
+auc2=ModelMetrics::auc(testdata2$label,res2$Prediction)
+auc3=ModelMetrics::auc(testdata3$label,res3$Prediction)
+auc4=ModelMetrics::auc(testdata4$label,res4$Prediction)
+auc1
+auc2
+auc3
+auc4
+
+```
+
+## NN:
+
+```{r eval=FALSE, include=FALSE}
+
+result_nn <- nn(
+  traindata, 
+  rvar = rvar, 
+  evar = evar, 
+  lev = lev,
+  size=1,
+  decay=0.5,
+  seed=1234,
+  wts=traindata$cweight
+)
+
+val=cv.nn(result_nn, K = 5, decay = seq(.05, .3, .05), size = 4:6, seed = 1234, trace = T, fun = auc)
+
+#val$decay[1]
+
+# decay =0.1, size=5 yield the highest average auc
+
+```
+
+![result of cross validation of NN](data/deep learning result.png)
+
+```{r}
+
+nnmodel <- nn(
+  traindata, 
+  rvar = rvar, 
+  evar = evar, 
+  lev = lev,
+  size=5,
+  decay=0.1,
+  wts="cweight",
+  seed=1234
+)
+
+pred_pro=predict(nnmodel, pred_data=testdata)
+auc_nn=ModelMetrics::auc(testdata$label,pred_pro$Prediction)
+auc_nn
+```
+
+
+xgboost and random forest model please see python notebook.
+
+![classifier model comparision](data/model comparison auc.png)
+
+So we use nn model to predict the probability:
+
+1. For each customer determine the message (i.e., endurance, strength, water, team,
+backcountry, winter, or racquet) predicted to lead to the highest probability of purchase.
+Describe your approach. 
+
+
+```{r}
+rep=pentathlon_nptb %>% filter(representative == 1)
+rep=rep%>% mutate(income_bins=xtile(income,10),education_bins=xtile(education,10),child_bins=xtile(children,10)) 
+
+
+backcountry_prob=predict(nnmodel,pred_data=rep,pred_cmd="message='backcountry'")
+rep=store(rep,backcountry_prob,name='backcountry_prob')
+endurance_prob=predict(nnmodel,pred_data=rep,pred_cmd="message='endurance'")
+rep=store(rep,endurance_prob,name='endurance_prob')
+racquet_prob=predict(nnmodel,pred_data=rep,pred_cmd="message='racquet'")
+rep=store(rep,racquet_prob,name='racquet_prob')
+strength_prob=predict(nnmodel,pred_data=rep,pred_cmd="message='strength'")
+rep=store(rep,strength_prob,name='strength_prob')
+team_prob=predict(nnmodel,pred_data=rep,pred_cmd="message='team'")
+rep=store(rep,team_prob,name='team_prob')
+water_prob=predict(nnmodel,pred_data=rep,pred_cmd="message='water'")
+rep=store(rep,water_prob,name='water_prob')
+winter_prob=predict(nnmodel,pred_data=rep,pred_cmd="message='winter'")
+rep=store(rep,winter_prob,name='winter_prob')
+
+rep=rep%>% mutate(to_message=c('backcountry','endurance','racquet','strength','team','water','winter')[which.pmax(backcountry_prob,endurance_prob,racquet_prob,strength_prob,team_prob,water_prob,winter_prob)])
+
+rep
+```
+
+2. For each message, report the percentage of customers for whom that message maximizes
+their probability of purchase.
+
+```{r}
+
+prob_customer_percentage=rep %>% group_by(to_message) %>% summarize(n=n(),percentage=n/nrow(rep)) %>% arrange(desc(percentage))
+prob_customer_percentage
+```
+
+3. For each customer, determine the message (i.e., endurance, strength, water, team,
+backcountry, winter, or racquet) predicted to lead to the highest expected profit (COGS
+is 60%). Describe your approach to predict order size and how you calculated expected
+profit. 
+
+# linear regression model 1
+```{r}
+
+evar=c("age","gender","education","income","children","message","freq_endurance","freq_strength","freq_water","freq_team","freq_backcountry", "freq_winter", "freq_racquet")
+
+linearmodel1 <- regress(traindata, rvar = 'total_os', evar =evar,int=c("message:freq_endurance","message:freq_strength","message:freq_water","message:freq_team","message:freq_backcountry", "message:freq_winter", "message:age","message:gender","message:education","message:children","message:income"))
+pred1=predict(linearmodel1,pred_data=testdata)
+
+testdata$resi= testdata$total_os-pred1$Prediction
+RMSE1=sqrt(mean(testdata$resi^2))
+RMSE1
+```
+
+
+# linear regression model 2
+```{r}
+evar=c("age","gender","education","income","children","message","freq_endurance","freq_strength","freq_water","freq_team","freq_backcountry", "freq_winter", "freq_racquet")
+int=c("message:freq_endurance","message:freq_strength","message:freq_water","message:freq_team","message:freq_backcountry", "message:freq_winter", "message:freq_racquet","age:gender")
+
+linearmodel2 <- regress(traindata, rvar = 'total_os', evar =evar,int=int)
+pred2=predict(linearmodel2,pred_data=testdata)
+
+testdata$resi2= testdata$total_os-pred2$Prediction
+RMSE2=sqrt(mean(testdata$resi2^2))
+RMSE2
+```
+
+xgboost, mlp model please see python notebook.
+
+![classifier model comparision](data/model comparison rmse.png)
+
+Finally, we use mlp model to predict total_ords and then calculate the expected profit by multiplying the probability of each product.
+
+```{r}
+repre_profit_deeplearning=read.csv("repre_profit_deeplearning.csv")
+
+
+repre_profit_deeplearning <- select(repre_profit_deeplearning, c("endurance", "strength", "water", "team", "backcountry", "winter", "racquet"))
+
+repre_profit_deeplearning[repre_profit_deeplearning < 0] <- 0
+
+b=repre_profit_deeplearning$backcountry
+e=repre_profit_deeplearning$endurance
+r=repre_profit_deeplearning$racquet
+s=repre_profit_deeplearning$strength
+t=repre_profit_deeplearning$team
+wa=repre_profit_deeplearning$water
+wi=repre_profit_deeplearning$winter
+
+rep_profit=rep%>% mutate(to_message=c('backcountry','endurance','racquet','strength','team','water','winter')[which.pmax(backcountry_prob*b,endurance_prob*e,racquet_prob*r,strength_prob*s,team_prob*t,water_prob*wa,winter_prob*wi)])
+
+rep_profit
+
+```
+4. Report for each message, i.e., endurance, racket, etc., the percentage of customers for
+whom that message maximizes their expected profit. 
+
+```{r}
+
+profit_customer_percentage=rep_profit %>% group_by(to_message) %>% summarize(n=n(),percentage=n/nrow(rep_profit)) %>% arrange(desc(percentage))
+profit_customer_percentage
+
+```
+
+5. What expected profit can we obtain, on average, per e-mailed customer if we customize
+the message to each customer? 
+
+```{r}
+rep_profit2=rep_profit %>% mutate(maximum_profit=pmax(backcountry_prob*b,endurance_prob*e,racquet_prob*r,strength_prob*s,team_prob*t,water_prob*wa,winter_prob*wi))
+exp_profit_percustomer= sum(rep_profit2$maximum_profit)/nrow(rep)
+exp_profit_percustomer
+```
+
+6. What is the expected profit per e-mailed customer if every customer receives the same
+message? Answer this question for each of the seven possible messages (i.e., endurance,
+strength, water, team, backcountry, winter, or racquet). 
+
+```{r}
+
+rep_profit_each=rep_profit %>% mutate(backcountry_profit=backcountry_prob*b,endurance_profit=endurance_prob*e,racquet_profit=racquet_prob*r,strength_profit=strength_prob*s,team_profit=team_prob*t,water_profit=water_prob*wa,winter_profit=winter_prob*wi) 
+
+rep_profit_each_gather=rep_profit_each%>% 
+  gather(product,expected_profit,backcountry_profit:winter_profit)%>%
+  group_by(product) %>%
+  summarize(total_exp_profit=sum(expected_profit),profit_per_customer=total_exp_profit/nrow(rep_profit))%>%
+  arrange(desc(profit_per_customer))
+                          
+rep_profit_each_gather 
+
+```
+
+7. What is the expected profit per e-mailed customer if every customer is assigned randomly to one of the seven messages?
+
+```{r}
+random_exp_profit_percustomer=mean(rep_profit_each_gather$profit_per_customer)
+random_exp_profit_percustomer 
+
+```
+
+8. For the typical promotional e-mail blast to 5,000,000 customers, what improvement (in
+percent and in total Euros) could Pentathlon achieve by customizing the message to each
+customer rather than assigning customers a message randomly?
+ You can, however, use this larger dataset to re-estimate your chosen model
+and generate profit estimates for the representative sample
+
+
+```{r}
+#in total Euros
+total_euros=(exp_profit_percustomer-random_exp_profit_percustomer)*5000000
+total_euros
+
+#in percent
+per=exp_profit_percustomer/random_exp_profit_percustomer-1
+per
+
+```
+
+
+### proposal:
+
+First, looking at our proportion analysis, we discovered that some products are popular (like endurance), and some are not popular whatsoever (such as team). Noting that, it is possible that down the road it will always be the two departments that are able to send the emails. In essence, the data will be self-reinforcing and skew the importance or probability of sale by department message. We will be lacking the data needed to determine if it is still wise to not send emails from the unpopular department.  In order to improve, we suggest doing an AB test, or withholding a different part of the population every month in order to gain unbiased data for the model. Randomly selecting and rotating who is left out of the targeted marketing will continue to provide data that we can capitalize on to improve the model. 
+
+Second, the model omits important features such as the time. The R squared is low, at only 20%. What if the orders are purchased during discounting season? Time would be critical in order to further understand seasonality within the targets. We saw that winter was provided a low number of emails. We expect this to be dependent on what season we are in and if people are getting ready for the upcoming snowboarding /skiing season.  In order to improve on this, we would like to add features that capture seasonality. So that we could improve the accuracy of the model and avoid recommending winter product during summer. If we could get time/date information of when the emails were sent, and when the purchase was made, further models could include this information on a season to further increase response rate. 
+
+
+Finally, the first and second email to send could be vastly different in expected revenue. For instance, highest expected profits could be $7 for winter and $3 for team. It would be unwise to split the mail 50/50, as more should be focused on the winter category. We propose looking at the proportion of the expected profits and adjusting that way. So, in our example, if 10 emails were sent out, we would send an extra 2 emails to winter for a total of 7, and only 3 to team. 
+
+
+
+
+
